@@ -1,0 +1,17 @@
+#data created by Signal-Server 
+src/*.o
+src/signalserver
+src/signalserverHD
+src/signalserverLIDAR
+signalserver
+signalserverHD
+signalserverLIDAR
+tests/*
+
+# height data
+data/LIDAR/*
+data/SRTM1/*
+data/SRTM3/*
+
+# antenna radiation pattern diagrams
+antenna/*
