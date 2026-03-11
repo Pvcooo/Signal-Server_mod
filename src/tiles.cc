@@ -7,6 +7,7 @@
 #include "common.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
+#include "ogr_spatialref.h"
 
 #define MAX_LINE 50000
 
@@ -159,30 +160,93 @@ int tile_load_geotiff(tile_t *tile, char *filename) {
     // gt[0]=originX (lon left), gt[3]=originY (lat top)
     // gt[1]=pixelWidth, gt[5]=pixelHeight (usually negative)
     // gt[2], gt[4] rotation (should be 0 for north-up)
-    if (fabs(gt[2]) > 1e-12 || fabs(gt[4]) > 1e-12) {
-        // No soportamos rasters rotados en este "mínimo viable"
-        GDALClose(ds);
-        return -1;
-    }
+	if (fabs(gt[2]) > 1e-12 || fabs(gt[4]) > 1e-12) {
+	    if (debug) {
+	        fprintf(stderr, "Unaccepted GeoTIFF %s: rotated raster/skewed not supported\n", filename);
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
 
-    // SOLO soporte GeoTIFF en grados
-    const char *proj = ds->GetProjectionRef();
-    if (!proj || !strstr(proj, "WGS 84")) {
-        // GDALClose(ds); return -1;
-    }
+	// Just GeoTIFF WGS84 (EPSG:4326)
+	const char *proj = ds->GetProjectionRef();
+	if (!proj || strlen(proj) == 0) {
+	    if (debug) {
+	        fprintf(stderr, "GeoTIFF %s without projection/CRS defined\n", filename);
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
+	
+	OGRSpatialReference srs;
+	char *proj_wkt = strdup(proj);
+	if (!proj_wkt) {
+	    GDALClose(ds);
+	    return ENOMEM;
+	}
+	
+	OGRErr srs_err = srs.importFromWkt(&proj_wkt);
+	free(proj_wkt);
+	
+	if (srs_err != OGRERR_NONE) {
+	    if (debug) {
+	        fprintf(stderr, "GeoTIFF %s with invalid WKT/CRS\n", filename);
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
+	
+	if (!srs.IsGeographic()) {
+	    if (debug) {
+	        fprintf(stderr, "Unaccepted GeoTIFF %s: proyected CRS, not geographical\n", filename);
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
+	
+	const char *auth_name = srs.GetAuthorityName(NULL);
+	const char *auth_code = srs.GetAuthorityCode(NULL);
+	
+	if (!auth_name || !auth_code ||
+	    strcmp(auth_name, "EPSG") != 0 ||
+	    strcmp(auth_code, "4326") != 0) {
+	    if (debug) {
+	        fprintf(stderr, "Unaccepted GeoTIFF %s: only admited EPSG:4326 and this is %s:%s\n",
+	                filename,
+	                auth_name ? auth_name : "UNKNOWN",
+	                auth_code ? auth_code : "UNKNOWN");
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
 
     tile->width  = width;
     tile->height = height;
 
-    double xll = gt[0];                 // lon izquierda
-    double yur = gt[3];                 // lat arriba
-    double cellx = gt[1];               // grados/pixel
-    double celly = gt[5];               // grados/pixel (negativo típicamente)
+    double xll = gt[0];                 // left lon
+    double yur = gt[3];                 // upper lat
+    double cellx = gt[1];               // deg/pixel
+    double celly = gt[5];               // deg/pixel (usually negative)
+
+	if (fabs(fabs(cellx) - fabs(celly)) > 1e-12) {
+	    if (debug) {
+	        fprintf(stderr, "Un accepted GeoTIFF %s: not squared pixel (dx=%.12f dy=%.12f)\n",
+	                filename, cellx, celly);
+	        fflush(stderr);
+	    }
+	    GDALClose(ds);
+	    return -1;
+	}
 
     double yll = yur + celly * height;
     double xur = xll + cellx * width;
 
-    tile->cellsize = fabs(cellx);  // asumimos píxel cuadrado en grados
+    tile->cellsize = fabs(cellx);  // asumed squared pixel in degrees
 
     tile->xll = xll;
     tile->yll = yll;
@@ -228,8 +292,8 @@ int tile_load_geotiff(tile_t *tile, char *filename) {
 
     for (size_t i = 0; i < (size_t)width * (size_t)height; i++) {
         float v = tmp[i];
-        if (hasNoData && fabs(v - (float)nd) < 1e-6f) v = 0.0f; // normaliza nodata a 0 (mar)
-        if (v <= 0) v = 0;                                     // mantiene regla actual de lidar loader
+        if (hasNoData && fabs(v - (float)nd) < 1e-6f) v = 0.0f; // normalizes nodata to 0 (mar)
+        if (v <= 0) v = 0;                                     // manteins current lidar loader rule
         short sv = (short)lrintf(v);
         tile->data[i] = sv;
         if (sv > tile->max_el) tile->max_el = sv;
