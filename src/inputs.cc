@@ -297,7 +297,7 @@ int loadLIDAR(char *filenames, int resample)
 				fflush(stderr);
 			}
 			if (rescale != 1){
-				if( (success = tile_rescale(&tiles[i], rescale) != 0 ) ){
+				if( (success = tile_rescale(&tiles[i], rescale)) != 0 ){
 					fprintf(stderr, "Error resampling tiles\n");
 					fflush(stderr);
 					return success;
@@ -2525,3 +2525,4 @@ int LoadUDT(char *filename)
 	unlink(tempname);
 	return 0;
 }
+
