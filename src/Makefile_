@@ -1,15 +1,16 @@
-SHELL		= /bin/sh
+SHELL = /bin/sh
+CC = gcc
+CXX = g++
 
-CC		= gcc
-CXX		= g++
-CFLAGS		= -Wall -O3 -s -ffast-math -DCROPPING
-CXXFLAGS        = -Wall -O3 -s -ffast-math $(GDAL_CFLAGS)
-GDAL_CFLAGS     := $(shell gdal-config --cflags)
-GDAL_LIBS       := $(shell gdal-config --libs)
-LIBS            = -lm -lpthread -ldl -lbz2 -lz $(GDAL_LIBS)
+GDAL_CFLAGS := $(shell gdal-config --cflags)
+GDAL_LIBS   := $(shell gdal-config --libs)
 
-INSTALL_PATH	= ..
-VPATH		= models
+CFLAGS = -Wall -O3 -s -ffast-math -DCROPPING
+CXXFLAGS = -Wall -O3 -s -ffast-math $(GDAL_CFLAGS)
+LIBS = -lm -lpthread -ldl -lbz2 -lz $(GDAL_LIBS)
+
+INSTALL_PATH = ..
+VPATH = models
 objects 	= main.o cost.o ecc33.o ericsson.o fspl.o hata.o itwom3.0.o \
 		  los.o sui.o pel.o egli.o soil.o inputs.o outputs.o image.o \
 		  image-ppm.o tiles.o
