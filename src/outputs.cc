@@ -1016,7 +1016,7 @@ void PathReport(struct site source, struct site destination, char *name,
 
 	int x, y, z, errnum;
 	char basename[255], term[30], ext[15], strmode[100],
-	    report_name[80], block = 0;
+	    report_name[512], block = 0;
 	double maxloss = -100000.0, minloss = 100000.0, angle1, angle2,
 	    azimuth, pattern = 1.0, patterndB = 0.0,
 	    total_loss = 0.0, cos_xmtr_angle, cos_test_angle = 0.0,
@@ -1026,7 +1026,7 @@ void PathReport(struct site source, struct site destination, char *name,
 	    0.0, voltage, rxp, power_density, dkm;
 	FILE *fd = NULL, *fd2 = NULL;
 
-	snprintf(report_name, 80, "%s.txt%c", name, 0);
+	snprintf(report_name, 512, "%s.txt%c", name, 0);
 	four_thirds_earth = FOUR_THIRDS * EARTHRADIUS;
 
 	fd2 = fopen(report_name, "w");
@@ -1037,18 +1037,18 @@ void PathReport(struct site source, struct site destination, char *name,
 	if (source.lat >= 0.0) {
 
 		if (source.lon <= 180){
-			fprintf(fd2, "Site location: %.4f, -%.4f\n",source.lat, source.lon);
+			fprintf(fd2, "Site location: %.9f, -%.9f\n",source.lat, source.lon);
 		}else{
-			fprintf(fd2, "Site location: %.4f, %.4f\n",source.lat, 360 - source.lon);
+			fprintf(fd2, "Site location: %.9f, %.9f\n",source.lat, 360 - source.lon);
 		}
 	}
 
 	else {
 
 		if (source.lon <= 180){
-			fprintf(fd2, "Site location: %.4f, -%.4f\n",source.lat, source.lon);
+			fprintf(fd2, "Site location: %.9f, -%.9f\n",source.lat, source.lon);
 		}else{
-			fprintf(fd2, "Site location: %.4f, %.4f\n",source.lat, 360 - source.lon);
+			fprintf(fd2, "Site location: %.9f, %.9f\n",source.lat, 360 - source.lon);
 		}
 	}
 
@@ -1107,18 +1107,18 @@ void PathReport(struct site source, struct site destination, char *name,
 	if (destination.lat >= 0.0) {
 
 		if (destination.lon <= 180){
-			fprintf(fd2, "Site location: %.4f, -%.4f\n",destination.lat, destination.lon);
+			fprintf(fd2, "Site location: %.9f, -%.9f\n",destination.lat, destination.lon);
 		}else{
-			fprintf(fd2, "Site location: %.4f, %.4f\n",destination.lat, 360 - destination.lon);
+			fprintf(fd2, "Site location: %.9f, %.9f\n",destination.lat, 360 - destination.lon);
 		}
 	}
 
 	else {
 
 		if (destination.lon <= 180){
-			fprintf(fd2, "Site location: %.4f, -%.4f\n",destination.lat, destination.lon);
+			fprintf(fd2, "Site location: %.9f, -%.9f\n",destination.lat, destination.lon);
 		}else{
-			fprintf(fd2, "Site location: %.4f, %.4f\n",destination.lat, 360 - destination.lon);
+			fprintf(fd2, "Site location: %.9f, %.9f\n",destination.lat, 360 - destination.lon);
 		}
 	}
 
@@ -1754,20 +1754,36 @@ void SeriesData(struct site source, struct site destination, char *name,
 	char basename[255], term[30], ext[15], profilename[255],
 	    referencename[255], cluttername[255], curvaturename[255],
 	    fresnelname[255], fresnel60name[255];
+	/* Absolute-coordinate files for terrain profile chart */
+	char terrainabsname[255], losabsname[255], f1absname[255], f60absname[255];
 	double a, b, c, height = 0.0, refangle, cangle, maxheight =
 	    -100000.0, minheight = 100000.0, lambda = 0.0, f_zone =
 	    0.0, fpt6_zone = 0.0, nm = 0.0, nb = 0.0, ed = 0.0, es = 0.0, r =
-	    0.0, d = 0.0, d1 = 0.0, terrain, azimuth, distance, minterrain =
-	    100000.0, minearth = 100000.0;
+	    0.0, d = 0.0, d1 = 0.0, terrain, ground_el = 0.0, los_m_abs = 0.0,
+	    azimuth, distance, minterrain = 100000.0, minearth = 100000.0;
 	struct site remote;
 	FILE *fd = NULL, *fd1 = NULL, *fd2 = NULL, *fd3 = NULL, *fd4 =
 	    NULL, *fd5 = NULL;
+	FILE *fd_tabs = NULL, *fd_labs = NULL, *fd_f1abs = NULL, *fd_f60abs = NULL;
 
 	ReadPath(destination, source);
 	azimuth = Azimuth(destination, source);
 	distance = Distance(destination, source);
 	refangle = ElevationAngle(destination, source);
 	b = GetElevation(destination) + destination.alt + earthradius;
+
+	/* Precompute TX and RX antenna heights AMSL (feet) for LOS linear interpolation.
+	   destination = TX (path[0]), source = RX (path[end]).
+	   GetElevation returns -5000.0 when a tile is not loaded (sentinel).
+	   If either endpoint is a sentinel, skip the LOS/Fresnel abs lines entirely. */
+	double tx_amsl_ft = GetElevation(destination) + destination.alt;
+	double rx_amsl_ft = GetElevation(source)      + source.alt;
+	double d_total_miles = (path.length > 1) ? path.distance[path.length - 1] : 1.0;
+	int los_abs_valid = (tx_amsl_ft > -4999.0 && rx_amsl_ft > -4999.0);
+	if (!los_abs_valid)
+		fprintf(stderr,
+		        "WARNING: TX or RX tile not loaded (GetElevation sentinel). "
+		        "LOS profile line will not be plotted.\n");
 
 	if (debug) {
 	        fprintf(stderr, "SeriesData: az = %lf, dist = %lf, ref = %lf, b = %lf\n", azimuth, distance, refangle, b);
@@ -1810,11 +1826,24 @@ void SeriesData(struct site source, struct site destination, char *name,
 		fd4 = fopen(fresnel60name, "wb");
 	}
 
+	/* Open absolute-coordinate data files (always metric, for profile chart) */
+	snprintf(terrainabsname, 254, "%s_terrain_abs", name);
+	snprintf(losabsname,     254, "%s_los_abs",     name);
+	fd_tabs = fopen(terrainabsname, "wb");
+	fd_labs = fopen(losabsname,     "wb");
+	if ((LR.frq_mhz >= 20.0) && (LR.frq_mhz <= 100000.0) && fresnel_plot) {
+		snprintf(f1absname,  254, "%s_fresnel_abs",   name);
+		snprintf(f60absname, 254, "%s_fresnel60_abs", name);
+		fd_f1abs  = fopen(f1absname,  "wb");
+		fd_f60abs = fopen(f60absname, "wb");
+	}
+
 	for (x = 0; x < path.length - 1; x++) {
 		remote.lat = path.lat[x];
 		remote.lon = path.lon[x];
 		remote.alt = 0.0;
 		terrain = GetElevation(remote);
+		ground_el = terrain;  /* raw ground elevation (feet), before antenna offset */
 		if (x == 0)
 			terrain += destination.alt;	/* RX antenna spike */
 
@@ -1825,6 +1854,14 @@ void SeriesData(struct site source, struct site destination, char *name,
 							       DEG2RAD -
 							       cangle);
 		height = a - c;
+		/* LOS height AMSL (meters): linear interpolation TX antenna → RX antenna.
+		   Only computed when both endpoints have valid tile data (los_abs_valid). */
+		if (los_abs_valid) {
+			double frac = (d_total_miles > 0.0)
+			              ? path.distance[x] / d_total_miles : 0.0;
+			los_m_abs = METERS_PER_FOOT *
+			            (tx_amsl_ft + (rx_amsl_ft - tx_amsl_ft) * frac);
+		}
 
 		/* Per Fink and Christiansen, Electronics
 		 * Engineers' Handbook, 1989:
@@ -1878,6 +1915,16 @@ void SeriesData(struct site source, struct site destination, char *name,
 				KM_PER_MILE * path.distance[x],
 				METERS_PER_FOOT * (height - terrain));
 
+			/* Absolute-coordinate files (always metric).
+			   Skip points where GetElevation returned the -5000 sentinel
+			   (tile not loaded) to avoid spurious -1524 m spikes in the plot. */
+			if (ground_el > -4999.0) {
+				if (fd_tabs) fprintf(fd_tabs, "%.3f %.3f\n",
+					KM_PER_MILE * path.distance[x],
+					METERS_PER_FOOT * ground_el);
+			}
+			if (los_abs_valid && fd_labs) fprintf(fd_labs, "%.3f %.3f\n",
+				KM_PER_MILE * path.distance[x], los_m_abs);
 		}
 
 		else {
@@ -1902,6 +1949,15 @@ void SeriesData(struct site source, struct site destination, char *name,
 				fprintf(fd4, "%.3f %.3f\n",
 					KM_PER_MILE * path.distance[x],
 					METERS_PER_FOOT * fpt6_zone);
+				/* Absolute Fresnel zones (only when LOS endpoints are valid) */
+				if (los_abs_valid) {
+					if (fd_f1abs) fprintf(fd_f1abs, "%.3f %.3f\n",
+						KM_PER_MILE * path.distance[x],
+						los_m_abs + METERS_PER_FOOT * f_zone);
+					if (fd_f60abs) fprintf(fd_f60abs, "%.3f %.3f\n",
+						KM_PER_MILE * path.distance[x],
+						los_m_abs + METERS_PER_FOOT * fpt6_zone);
+				}
 			}
 
 			else {
@@ -1985,6 +2041,17 @@ void SeriesData(struct site source, struct site destination, char *name,
 	if ((LR.frq_mhz >= 20.0) && (LR.frq_mhz <= 100000.0) && fresnel_plot) {
 		fclose(fd3);
 		fclose(fd4);
+	}
+
+	/* Write TX endpoint and close absolute-coordinate files */
+	{
+		double last_km   = KM_PER_MILE * path.distance[path.length - 1];
+		double tx_gnd_m  = METERS_PER_FOOT * GetElevation(source);
+		double tx_amsl_m = METERS_PER_FOOT * (GetElevation(source) + source.alt);
+		if (fd_tabs)  { fprintf(fd_tabs,  "%.3f %.3f", last_km, tx_gnd_m);  fclose(fd_tabs);  }
+		if (fd_labs)  { fprintf(fd_labs,  "%.3f %.3f", last_km, tx_amsl_m); fclose(fd_labs);  }
+		if (fd_f1abs) { fprintf(fd_f1abs, "%.3f %.3f", last_km, tx_amsl_m); fclose(fd_f1abs); }
+		if (fd_f60abs){ fprintf(fd_f60abs,"%.3f %.3f", last_km, tx_amsl_m); fclose(fd_f60abs);}
 	}
 
 	if (name[0] == '.') {

@@ -5,9 +5,13 @@
 #include <math.h>
 #include <errno.h>
 #include <limits.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "common.h"
 #include "main.hh"
 #include "tiles.hh"
+#include "gdal_priv.h"
+#include "ogr_spatialref.h"
 #include <bzlib.h>
 #include <zlib.h>
 
@@ -176,24 +180,236 @@ int averageHeight(int height, int width, int x, int y){
 	}
 }
 
-int loadLIDAR(char *filenames, int resample)
+/*
+ * tile_overlaps_roi
+ * Fast bbox check: opens the file header only (no pixel data) and
+ * checks whether the tile's WGS84 extent overlaps the circular ROI
+ * described by (roi_lat, roi_lon_std) ± radius_deg in each axis.
+ * Returns true if the tile should be loaded, false if it can be skipped.
+ * On any GDAL error it conservatively returns true (include the tile).
+ */
+static bool tile_overlaps_roi(const char *filename,
+                               double roi_lat, double roi_lon_std,
+                               double radius_lat_deg, double radius_lon_deg)
+{
+    GDALAllRegister();
+    GDALDataset *ds = (GDALDataset*)GDALOpen(filename, GA_ReadOnly);
+    if (!ds) return true;
+
+    double gt[6];
+    if (ds->GetGeoTransform(gt) != CE_None) { GDALClose(ds); return true; }
+
+    int w = ds->GetRasterXSize();
+    int h = ds->GetRasterYSize();
+
+    /* Tile extent in source CRS */
+    double x_min = gt[0];
+    double y_max = gt[3];
+    double x_max = gt[0] + gt[1] * w;
+    double y_min = gt[3] + gt[5] * h;   /* gt[5] < 0 */
+
+    const char *proj = ds->GetProjectionRef();
+    double lon_min, lon_max, lat_min, lat_max;
+
+    if (proj && strlen(proj) > 0) {
+        OGRSpatialReference srs_src;
+        srs_src.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+
+        bool is_wgs84 = false;
+        if (srs_src.importFromWkt(proj) == OGRERR_NONE) {
+            is_wgs84 = srs_src.IsGeographic() &&
+                       srs_src.GetAuthorityName(NULL) &&
+                       srs_src.GetAuthorityCode(NULL) &&
+                       strcmp(srs_src.GetAuthorityName(NULL), "EPSG") == 0 &&
+                       strcmp(srs_src.GetAuthorityCode(NULL), "4326") == 0;
+        }
+
+        if (!is_wgs84) {
+            /* Reproject the 4 corners to WGS84 */
+            OGRSpatialReference srs_wgs84;
+            srs_wgs84.SetWellKnownGeogCS("WGS84");
+            srs_wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OGRCoordinateTransformation *ct =
+                OGRCreateCoordinateTransformation(&srs_src, &srs_wgs84);
+            if (!ct) { GDALClose(ds); return true; }
+
+            double xs[4] = {x_min, x_max, x_min, x_max};
+            double ys[4] = {y_min, y_min, y_max, y_max};
+            ct->Transform(4, xs, ys);
+            OGRCoordinateTransformation::DestroyCT(ct);
+
+            lon_min = lon_max = xs[0];
+            lat_min = lat_max = ys[0];
+            for (int i = 1; i < 4; i++) {
+                if (xs[i] < lon_min) lon_min = xs[i];
+                if (xs[i] > lon_max) lon_max = xs[i];
+                if (ys[i] < lat_min) lat_min = ys[i];
+                if (ys[i] > lat_max) lat_max = ys[i];
+            }
+        } else {
+            lon_min = x_min; lon_max = x_max;
+            lat_min = y_min; lat_max = y_max;
+        }
+    } else {
+        /* No CRS — assume values are already lat/lon */
+        lon_min = x_min; lon_max = x_max;
+        lat_min = y_min; lat_max = y_max;
+    }
+
+    GDALClose(ds);
+
+    /* AABB overlap test (include a 10% extra margin) */
+    double mlat = radius_lat_deg * 1.1;
+    double mlon = radius_lon_deg * 1.1;
+    return !(lon_max < roi_lon_std - mlon ||
+             lon_min > roi_lon_std + mlon ||
+             lat_max < roi_lat   - mlat  ||
+             lat_min > roi_lat   + mlat);
+}
+
+int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, double radius_miles)
 {
 	char *filename;
 	char *files[900]; // 20x20=400, 16x16=256 tiles
+	bool  files_allocd[900];   /* true if files[i] was malloc'd (dir scan) */
 	int indx = 0, fc = 0, success;
 	double avgCellsize = 0, smCellsize = 0;
 	tile_t *tiles;
+
+	memset(files_allocd, 0, sizeof(files_allocd));
 
 	// Initialize global variables before processing files
 	min_west = 361; // any value will be lower than this
 	max_west = 0;   // any value will be higher than this
 
-	// test for multiple files
+	/* Tokenize the filenames string.
+	 * If a token is a directory, scan it for terrain files (.asc / .tif / .tiff).
+	 * This lets the user pass a single directory to -lid instead of listing
+	 * every tile file individually, e.g.:  -lid DTM_models  */
 	filename = strtok(filenames, " ,");
-	while (filename != NULL) {
-		files[fc] = filename;
-		filename = strtok(NULL, " ,");	
-		fc++;
+	while (filename != NULL && fc < 900) {
+		struct stat st;
+		int st_ret = stat(filename, &st);
+
+		if (st_ret == 0 && S_ISDIR(st.st_mode)) {
+			/* ---- DIRECTORY: scan for terrain files ---- */
+			DIR *d = opendir(filename);
+			if (!d) {
+				fprintf(stderr, "Error: cannot open directory '%s': %s\n",
+				        filename, strerror(errno));
+				fflush(stderr);
+				return errno;
+			}
+			size_t dirlen = strlen(filename);
+			bool has_sep = (dirlen > 0 && filename[dirlen - 1] == '/');
+			struct dirent *ent;
+			int found = 0;
+			while ((ent = readdir(d)) != NULL && fc < 900) {
+				const char *name = ent->d_name;
+				size_t n = strlen(name);
+				bool is_terrain =
+				    (n >= 4 && strcasecmp(name + n - 4, ".asc")  == 0) ||
+				    (n >= 4 && strcasecmp(name + n - 4, ".tif")  == 0) ||
+				    (n >= 5 && strcasecmp(name + n - 5, ".tiff") == 0);
+				if (!is_terrain) continue;
+				/* build full path: dir[/]name */
+				size_t pathlen = dirlen + (has_sep ? 0 : 1) + n + 1;
+				char *fullpath = (char*)malloc(pathlen);
+				if (!fullpath) { closedir(d); return ENOMEM; }
+				snprintf(fullpath, pathlen, "%s%s%s",
+				         filename, has_sep ? "" : "/", name);
+				files[fc] = fullpath;
+				files_allocd[fc] = true;
+				fc++;
+				found++;
+			}
+			closedir(d);
+			fprintf(stderr, "Directory '%s': %d terrain file(s) found\n",
+			        filename, found);
+			fflush(stderr);
+			if (found == 0) {
+				fprintf(stderr, "Error: no .asc/.tif/.tiff files found in '%s'\n",
+				        filename);
+				fflush(stderr);
+				return ENOENT;
+			}
+
+		} else if (st_ret == 0 && S_ISREG(st.st_mode)) {
+			/* ---- REGULAR FILE: keep as-is ---- */
+			files[fc] = filename;
+			files_allocd[fc] = false;
+			fc++;
+
+		} else {
+			/* ---- PATH NOT FOUND or inaccessible ---- */
+			size_t n = strlen(filename);
+			bool has_terrain_ext =
+			    (n >= 4 && strcasecmp(filename + n - 4, ".asc")  == 0) ||
+			    (n >= 4 && strcasecmp(filename + n - 4, ".tif")  == 0) ||
+			    (n >= 5 && strcasecmp(filename + n - 5, ".tiff") == 0);
+
+			if (!has_terrain_ext) {
+				/* Looks like a directory/path that doesn't exist */
+				fprintf(stderr, "Error: '%s': no such file or directory\n",
+				        filename);
+				fflush(stderr);
+				return ENOENT;
+			}
+			/* Has a terrain extension — pass it through and let the
+			 * loader produce a specific error for this file */
+			files[fc] = filename;
+			files_allocd[fc] = false;
+			fc++;
+		}
+		filename = strtok(NULL, " ,");
+	}
+
+	if (fc == 0) {
+		fprintf(stderr, "Error: no terrain files to load\n");
+		fflush(stderr);
+		return ENOENT;
+	}
+
+	/* ----------------------------------------------------------------
+	 * Spatial filter: discard tiles that don't overlap the TX area.
+	 * This is critical when a directory contains hundreds of tiles
+	 * covering a large region but only a handful are needed for the
+	 * requested radius around the transmitter.
+	 * ---------------------------------------------------------------- */
+	if (tx_lat > -90.0 && tx_lat < 90.0 && radius_miles > 0.0) {
+		/* Convert radius to degrees */
+		double radius_km  = radius_miles * 1.609344; // tile_overlaps_roi already adds 10% bbox buffer
+		double radius_lat = radius_km / 111.32;
+		double cos_lat    = cos(tx_lat * 3.14159265358979323846 / 180.0);
+		double radius_lon = radius_km / (111.32 * (cos_lat > 0.01 ? cos_lat : 0.01));
+
+		/* Convert positive-westing → standard longitude (-180..+180) */
+		double tx_lon_std = (tx_lon_west <= 180.0) ? -tx_lon_west : (360.0 - tx_lon_west);
+
+		int fc_filtered = 0;
+		for (int i = 0; i < fc; i++) {
+			if (tile_overlaps_roi(files[i], tx_lat, tx_lon_std,
+			                      radius_lat, radius_lon)) {
+				files[fc_filtered]       = files[i];
+				files_allocd[fc_filtered] = files_allocd[i];
+				fc_filtered++;
+			} else {
+				if (files_allocd[i]) free(files[i]);
+			}
+		}
+
+		fprintf(stderr, "Spatial filter: %d/%d tile(s) overlap the ROI "
+		        "(TX %.9f,%.9f R=%.1fmi)\n",
+		        fc_filtered, fc, tx_lat, tx_lon_std, radius_miles);
+		fflush(stderr);
+
+		fc = fc_filtered;
+		if (fc == 0) {
+			fprintf(stderr, "Error: no tiles overlap TX location — "
+			        "check coordinates and terrain directory\n");
+			fflush(stderr);
+			return ENOENT;
+		}
 	}
 
 	/* Allocate the tile array */
@@ -203,28 +419,50 @@ int loadLIDAR(char *filenames, int resample)
 		return ENOMEM;
 	}
 
+	/* Pre-compute load_resample here so it is in scope after the loop
+	 * (used when deciding whether tile_rescale is a no-op). */
+	int load_resample = (resample > 1) ? resample : 1;
+
 	/* Load each tile in turn */
 	for (indx = 0; indx < fc; indx++) {
 
 		/* Grab the tile metadata */
-		// Decide loader por extensión
+		/* Decide loader by file extension:
+		 *   .tif / .tiff  → GDAL (with automatic reprojection to WGS84)
+		 *   .asc          → try GDAL first (supports projected CRS via .prj sidecar),
+		 *                   fall back to the legacy ASCII-grid loader if GDAL fails
+		 *   anything else → legacy ASCII-grid loader */
 		const char *fn = files[indx];
 		size_t n = strlen(fn);
 
-		bool is_tif = (n >= 4 && (strcasecmp(fn + n - 4, ".tif") == 0)) ||
-              		      (n >= 5 && (strcasecmp(fn + n - 5, ".tiff") == 0));
+		bool is_tif = (n >= 4 && strcasecmp(fn + n - 4, ".tif")  == 0) ||
+		              (n >= 5 && strcasecmp(fn + n - 5, ".tiff") == 0);
+		bool is_asc = (n >= 4 && strcasecmp(fn + n - 4, ".asc")  == 0);
 
 		if (is_tif) {
-	   	    success = tile_load_geotiff(&tiles[indx], files[indx]);
+			success = tile_load_geotiff(&tiles[indx], files[indx], load_resample);
+		} else if (is_asc) {
+			/* Try GDAL first — handles projected CRS (e.g. EPSG:25830 Navarra MDT)
+			 * when a .prj sidecar file is present.  Falls back to the legacy
+			 * loader for plain WGS84 ASCII grids that have no projection file. */
+			success = tile_load_geotiff(&tiles[indx], files[indx], load_resample);
+			if (success != 0) {
+				if (debug) {
+					fprintf(stderr, "GDAL failed for %s (rc=%d), trying legacy ASCII-grid loader\n",
+					        files[indx], success);
+					fflush(stderr);
+				}
+				success = tile_load_lidar(&tiles[indx], files[indx]);
+			}
 		} else {
-		    success = tile_load_lidar(&tiles[indx], files[indx]);
+			success = tile_load_lidar(&tiles[indx], files[indx]);
 		}
 
 		if (success != 0) {
-		    fprintf(stderr,"Failed to load LIDAR tile %s\n",files[indx]);
-		    fflush(stderr);
-		    free(tiles);
-		    return success;
+			fprintf(stderr, "Failed to load tile %s\n", files[indx]);
+			fflush(stderr);
+			free(tiles);
+			return success;
 		}
 
 		if (debug) {
@@ -284,7 +522,14 @@ int loadLIDAR(char *filenames, int resample)
 	float desired_resolution = resample != 0 && smallest_res < resample ? resample : smallest_res;
 
 	if(resample>1){
-		desired_resolution=smallest_res*resample;
+		/* If GDAL already downsampled during tile_load_geotiff (load_resample>1),
+		 * tiles[i].resolution already reflects the reduced resolution — don't
+		 * multiply again, or we would double-apply the resample factor. */
+		if(load_resample > 1){
+			desired_resolution = smallest_res; // already at target, rescale=1 → no-op
+		} else {
+			desired_resolution=smallest_res*resample;
+		}
 	}
 
 	// Don't resize large 1 deg tiles in large multi-degree plots as it gets messy
@@ -497,6 +742,11 @@ int loadLIDAR(char *filenames, int resample)
 	        for (size_t i = 0; i < (unsigned)fc-1; i++)
 			tile_destroy(&tiles[i]);
 	free(tiles);
+
+	/* Free paths that were malloc'd during directory scanning */
+	for (int i = 0; i < fc; i++)
+		if (files_allocd[i])
+			free(files[i]);
 
 	return 0;
 }

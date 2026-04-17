@@ -30,6 +30,8 @@ double version = 3.21;
 #include <limits.h>
 #include <bzlib.h>
 #include <zlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "common.h"
 #include "inputs.hh"
@@ -1053,6 +1055,22 @@ void do_allocs(void)
 	}
 }
 
+/* Create all directories in path (like mkdir -p). Ignores EEXIST. */
+static void makedirs(const char *path)
+{
+	char tmp[512];
+	char *p;
+	snprintf(tmp, sizeof(tmp), "%s", path);
+	for (p = tmp + 1; *p; p++) {
+		if (*p == '/') {
+			*p = '\0';
+			mkdir(tmp, 0755);
+			*p = '/';
+		}
+	}
+	mkdir(tmp, 0755);
+}
+
 int main(int argc, char *argv[])
 {
 	int x, y, z = 0, propmodel, knifeedge = 0, ppa = 0, normalise = 0,
@@ -1096,7 +1114,9 @@ int main(int argc, char *argv[])
 		fprintf(stdout, "Usage: signalserver [data options] [input options] [antenna options] [output options] -o outputfile\n\n");
 		fprintf(stdout, "Data:\n");
 		fprintf(stdout, "     -sdf Directory containing SRTM derived .sdf DEM tiles (may be .gz or .bz2)\n");
-		fprintf(stdout, "     -lid ASCII grid (.asc) or GeoTIFF (.tif/.tiff) tile (WGS84) with dimensions/resolution in metadata\n");
+		fprintf(stdout, "     -lid Terrain tile(s): .asc (ASCII grid) or .tif/.tiff (GeoTIFF), any CRS (auto-reprojected to WGS84)\n");
+		fprintf(stdout, "          Accepts a directory path to load all terrain files in that folder, e.g.: -lid DTM_models\n");
+		fprintf(stdout, "          Multiple files/dirs can be comma- or space-separated\n");
 		fprintf(stdout, "     -udt User defined point clutter as decimal co-ordinates: 'latitude,longitude,height'\n");
 		fprintf(stdout, "     -clt MODIS 17-class wide area clutter in ASCII grid format\n");
 		fprintf(stdout, "     -color File to pre-load .scf/.lcf/.dcf for Signal/Loss/dBm color palette\n");
@@ -1297,6 +1317,17 @@ int main(int argc, char *argv[])
 			z = x + 1;
 
 			if (z <= y && argv[z][0] && argv[z][0] != '-') {
+				/* Create output directory if path contains one */
+				{
+					char dirpath[512];
+					strncpy(dirpath, argv[z], sizeof(dirpath)-1);
+					dirpath[sizeof(dirpath)-1] = '\0';
+					char *slash = strrchr(dirpath, '/');
+					if (slash && slash != dirpath) {
+						*slash = '\0';
+						makedirs(dirpath);
+					}
+				}
 				strncpy(mapfile, argv[z], 253);
 				strncpy(tx_site[0].name, "Tx", 2);
 				strncpy(tx_site[0].filename, argv[z], 253);
@@ -1812,7 +1843,8 @@ int main(int argc, char *argv[])
 
 	/* Load the required tiles */
 	if (lidar) {
-		if( (result = loadLIDAR(lidar_tiles, resample)) != 0 ){
+		if( (result = loadLIDAR(lidar_tiles, resample,
+		                        tx_site[0].lat, tx_site[0].lon, max_range)) != 0 ){
 			fprintf(stderr, "Couldn't find one or more of the "
 				"lidar files. Please ensure their paths are "
 				"correct and try again.\n");
@@ -1820,9 +1852,19 @@ int main(int argc, char *argv[])
 			exit(result);
 		}
 
-		ppd=((double)height / (max_north-min_north));
-		yppd=ppd;
-		
+		ppd = (double)height / (max_north - min_north);
+
+		/* Compute yppd (pixels-per-degree in longitude) from the actual
+		 * tile width rather than assuming square degree-pixels.  This is
+		 * important for data reprojected from UTM to WGS84, where the
+		 * pixel cell size in degrees differs slightly between N/S and E/W. */
+		{
+			double lon_range_w = (max_west >= min_west) ?
+			                     (max_west - min_west) :
+			                     (max_west + 360.0 - min_west);
+			yppd = (lon_range_w > 0.0) ? ((double)width / lon_range_w) : ppd;
+		}
+
 		if (debug) {
 			fprintf(stderr,"ppd %lf, yppd %lf, %.4lf,%.4lf,%.4lf,%.4lf,%d x %d\n",ppd,yppd,max_north,min_west,min_north,max_west,width,height);
 			fflush(stderr);

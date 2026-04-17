@@ -8,6 +8,7 @@
 #include "gdal_priv.h"
 #include "cpl_conv.h"
 #include "ogr_spatialref.h"
+#include "gdalwarper.h"
 
 #define MAX_LINE 50000
 
@@ -140,148 +141,197 @@ int tile_load_lidar(tile_t *tile, char *filename){
 }
 
 
-int tile_load_geotiff(tile_t *tile, char *filename) {
-    // Inicializa
+int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
     memset(tile, 0x00, sizeof(tile_t));
 
     GDALAllRegister();
 
-    GDALDataset *ds = (GDALDataset*) GDALOpen(filename, GA_ReadOnly);
-    if (!ds) return -1;
+    GDALDataset *ds_orig = (GDALDataset*) GDALOpen(filename, GA_ReadOnly);
+    if (!ds_orig) return -1;
+
+    /* Inspect CRS */
+    const char *proj = ds_orig->GetProjectionRef();
+    if (!proj || strlen(proj) == 0) {
+        if (debug) {
+            fprintf(stderr, "GDAL file %s has no CRS/projection defined\n", filename);
+            fflush(stderr);
+        }
+        GDALClose(ds_orig);
+        return -1;
+    }
+
+    OGRSpatialReference srs_src;
+    srs_src.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    if (srs_src.importFromWkt(proj) != OGRERR_NONE) {
+        if (debug) {
+            fprintf(stderr, "GDAL file %s: invalid CRS WKT\n", filename);
+            fflush(stderr);
+        }
+        GDALClose(ds_orig);
+        return -1;
+    }
+
+    /* Determine if reprojection to WGS84 is needed */
+    bool is_wgs84 = srs_src.IsGeographic() &&
+                    srs_src.GetAuthorityName(NULL) &&
+                    srs_src.GetAuthorityCode(NULL) &&
+                    strcmp(srs_src.GetAuthorityName(NULL), "EPSG") == 0 &&
+                    strcmp(srs_src.GetAuthorityCode(NULL), "4326") == 0;
+
+    GDALDataset *ds = ds_orig;
+    bool warped = false;
+
+    if (!is_wgs84) {
+        OGRSpatialReference srs_wgs84;
+        srs_wgs84.SetWellKnownGeogCS("WGS84");
+        srs_wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        char *wgs84_wkt = NULL;
+        srs_wgs84.exportToWkt(&wgs84_wkt);
+
+        if (debug) {
+            const char *aname = srs_src.GetAuthorityName(NULL);
+            const char *acode = srs_src.GetAuthorityCode(NULL);
+            fprintf(stderr, "Reprojecting %s (%s:%s) to WGS84/EPSG:4326\n",
+                    filename,
+                    aname ? aname : "UNKNOWN",
+                    acode ? acode : "UNKNOWN");
+            fflush(stderr);
+        }
+
+        GDALDatasetH ds_warped_h = GDALAutoCreateWarpedVRT(
+            (GDALDatasetH)ds_orig,
+            NULL,          /* source WKT: auto-detect from source dataset */
+            wgs84_wkt,     /* target WKT: WGS84 geographic */
+            GRA_Bilinear,  /* resampling: bilinear for elevation smoothness */
+            0.125,         /* max error in pixels */
+            NULL           /* no extra warp options */
+        );
+        CPLFree(wgs84_wkt);
+
+        if (!ds_warped_h) {
+            if (debug) {
+                fprintf(stderr, "Failed to create warped VRT for %s\n", filename);
+                fflush(stderr);
+            }
+            GDALClose(ds_orig);
+            return -1;
+        }
+        ds = (GDALDataset*)ds_warped_h;
+        warped = true;
+    }
 
     const int width  = ds->GetRasterXSize();
     const int height = ds->GetRasterYSize();
-    if (width <= 1 || height <= 1) { GDALClose(ds); return -1; }
+    if (width <= 1 || height <= 1) {
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        return -1;
+    }
 
     double gt[6];
-    if (ds->GetGeoTransform(gt) != CE_None) { GDALClose(ds); return -1; }
+    if (ds->GetGeoTransform(gt) != CE_None) {
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        return -1;
+    }
 
-    // GeoTransform:
-    // gt[0]=originX (lon left), gt[3]=originY (lat top)
-    // gt[1]=pixelWidth, gt[5]=pixelHeight (usually negative)
-    // gt[2], gt[4] rotation (should be 0 for north-up)
-	if (fabs(gt[2]) > 1e-12 || fabs(gt[4]) > 1e-12) {
-	    if (debug) {
-	        fprintf(stderr, "Unaccepted GeoTIFF %s: rotated raster/skewed not supported\n", filename);
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
+    /* After warping to WGS84 the output is always north-up, but check anyway */
+    if (fabs(gt[2]) > 1e-9 || fabs(gt[4]) > 1e-9) {
+        if (debug) {
+            fprintf(stderr, "GDAL file %s: rotated/skewed raster not supported\n", filename);
+            fflush(stderr);
+        }
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        return -1;
+    }
 
-	// Just GeoTIFF WGS84 (EPSG:4326)
-	const char *proj = ds->GetProjectionRef();
-	if (!proj || strlen(proj) == 0) {
-	    if (debug) {
-	        fprintf(stderr, "GeoTIFF %s without projection/CRS defined\n", filename);
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
-	
-	OGRSpatialReference srs;
-	char *proj_wkt = strdup(proj);
-	if (!proj_wkt) {
-	    GDALClose(ds);
-	    return ENOMEM;
-	}
-	
-	OGRErr srs_err = srs.importFromWkt(&proj_wkt);
-	free(proj_wkt);
-	
-	if (srs_err != OGRERR_NONE) {
-	    if (debug) {
-	        fprintf(stderr, "GeoTIFF %s with invalid WKT/CRS\n", filename);
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
-	
-	if (!srs.IsGeographic()) {
-	    if (debug) {
-	        fprintf(stderr, "Unaccepted GeoTIFF %s: proyected CRS, not geographical\n", filename);
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
-	
-	const char *auth_name = srs.GetAuthorityName(NULL);
-	const char *auth_code = srs.GetAuthorityCode(NULL);
-	
-	if (!auth_name || !auth_code ||
-	    strcmp(auth_name, "EPSG") != 0 ||
-	    strcmp(auth_code, "4326") != 0) {
-	    if (debug) {
-	        fprintf(stderr, "Unaccepted GeoTIFF %s: only admited EPSG:4326 and this is %s:%s\n",
-	                filename,
-	                auth_name ? auth_name : "UNKNOWN",
-	                auth_code ? auth_code : "UNKNOWN");
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
+    double xll   = gt[0];   /* left longitude */
+    double yur   = gt[3];   /* upper latitude */
+    double cellx = gt[1];   /* degrees/pixel in X (positive) */
+    double celly = gt[5];   /* degrees/pixel in Y (negative) */
 
-    tile->width  = width;
-    tile->height = height;
-
-    double xll = gt[0];                 // left lon
-    double yur = gt[3];                 // upper lat
-    double cellx = gt[1];               // deg/pixel
-    double celly = gt[5];               // deg/pixel (usually negative)
-
-	if (fabs(fabs(cellx) - fabs(celly)) > 1e-12) {
-	    if (debug) {
-	        fprintf(stderr, "Un accepted GeoTIFF %s: not squared pixel (dx=%.12f dy=%.12f)\n",
-	                filename, cellx, celly);
-	        fflush(stderr);
-	    }
-	    GDALClose(ds);
-	    return -1;
-	}
+    /* Allow up to 2% non-squareness: GDALAutoCreateWarpedVRT normally produces
+       square pixels, but floating-point rounding can introduce tiny differences */
+    double pix_abs_x = fabs(cellx);
+    double pix_abs_y = fabs(celly);
+    double pix_avg   = (pix_abs_x + pix_abs_y) * 0.5;
+    double pix_diff  = fabs(pix_abs_x - pix_abs_y);
+    if (pix_avg > 0 && pix_diff / pix_avg > 0.02) {
+        if (debug) {
+            fprintf(stderr, "GDAL file %s: non-square pixels (dx=%.12f dy=%.12f, %.1f%% diff) — skipping\n",
+                    filename, cellx, celly, 100.0 * pix_diff / pix_avg);
+            fflush(stderr);
+        }
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        return -1;
+    }
 
     double yll = yur + celly * height;
     double xur = xll + cellx * width;
 
-    tile->cellsize = fabs(cellx);  // asumed squared pixel in degrees
+    /* Output pixel count — GDAL's RasterIO can downsample on the fly, which is
+     * much faster than reading at full resolution and rescaling afterward. */
+    int rf = (resample_factor > 1) ? resample_factor : 1;
+    int out_w = MAX(1, width  / rf);
+    int out_h = MAX(1, height / rf);
 
+    tile->width    = out_w;
+    tile->height   = out_h;
+    tile->cellsize = pix_avg * rf;  /* cell size at the output resolution */
     tile->xll = xll;
     tile->yll = yll;
     tile->xur = xur;
     tile->yur = yur;
-
     tile->filename = strdup(filename);
 
+    /* Convert to positive-westing convention used internally */
     if (tile->xll >= 0) tile->xll = 360 - tile->xll;
     if (tile->xur >= 0) tile->xur = 360 - tile->xur;
-    if (tile->xll < 0) tile->xll = tile->xll * -1;
-    if (tile->xur < 0) tile->xur = tile->xur * -1;
+    if (tile->xll < 0)  tile->xll = -tile->xll;
+    if (tile->xur < 0)  tile->xur = -tile->xur;
 
     if (tile->xur > eastoffset) eastoffset = tile->xur;
     if (tile->xll < westoffset) westoffset = tile->xll;
 
     GDALRasterBand *band = ds->GetRasterBand(1);
-    if (!band) { GDALClose(ds); free(tile->filename); return -1; }
+    if (!band) {
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        free(tile->filename);
+        return -1;
+    }
 
     int hasNoData = 0;
-    const double nd = band->GetNoDataValue(&hasNoData);
+    double nd = band->GetNoDataValue(&hasNoData);
     tile->nodata = hasNoData ? (short)nd : (short)-32768;
 
-    tile->data = (short*) calloc((size_t)width * (size_t)height, sizeof(short));
-    if (!tile->data) { GDALClose(ds); free(tile->filename); return ENOMEM; }
+    tile->data = (short*) calloc((size_t)out_w * (size_t)out_h, sizeof(short));
+    if (!tile->data) {
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        free(tile->filename);
+        return ENOMEM;
+    }
 
-    float *tmp = (float*) CPLMalloc(sizeof(float) * (size_t)width * (size_t)height);
-    if (!tmp) { GDALClose(ds); free(tile->data); free(tile->filename); return ENOMEM; }
+    /* Read directly at out_w×out_h: GDAL performs the downsampling internally.
+     * Source window = full raster; dest buffer = out_w×out_h → GDAL averages. */
+    float *tmp = (float*) CPLMalloc(sizeof(float) * (size_t)out_w * (size_t)out_h);
+    if (!tmp) {
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
+        free(tile->data);
+        free(tile->filename);
+        return ENOMEM;
+    }
 
     CPLErr e = band->RasterIO(GF_Read, 0, 0, width, height,
-                             tmp, width, height, GDT_Float32,
-                             0, 0);
+                               tmp, out_w, out_h, GDT_Float32, 0, 0);
     if (e != CE_None) {
         CPLFree(tmp);
-        GDALClose(ds);
+        if (warped) GDALClose(ds);
+        GDALClose(ds_orig);
         free(tile->data);
         free(tile->filename);
         return -1;
@@ -290,10 +340,11 @@ int tile_load_geotiff(tile_t *tile, char *filename) {
     tile->max_el = -32768;
     tile->min_el =  32767;
 
-    for (size_t i = 0; i < (size_t)width * (size_t)height; i++) {
+    for (size_t i = 0; i < (size_t)out_w * (size_t)out_h; i++) {
         float v = tmp[i];
-        if (hasNoData && fabs(v - (float)nd) < 1e-6f) v = 0.0f; // normalizes nodata to 0 (mar)
-        if (v <= 0) v = 0;                                     // manteins current lidar loader rule
+        /* nodata → sea level; tolerance of 0.5 covers integer nodata like -9999 */
+        if (hasNoData && fabs((double)v - nd) < 0.5) v = 0.0f;
+        if (v < 0) v = 0.0f;
         short sv = (short)lrintf(v);
         tile->data[i] = sv;
         if (sv > tile->max_el) tile->max_el = sv;
@@ -301,20 +352,26 @@ int tile_load_geotiff(tile_t *tile, char *filename) {
     }
 
     CPLFree(tmp);
-    GDALClose(ds);
+    if (warped) GDALClose(ds);
+    GDALClose(ds_orig);
 
-    double current_res_km = haversine_formula(tile->max_north, tile->max_west, tile->max_north, tile->min_west);
-    tile->precise_resolution = (current_res_km / MAX(tile->width, tile->height) * 1000);
-    tile->resolution = tile->precise_resolution < 0.5f ? 0.5f : ceil((tile->precise_resolution * 2) + 0.5) / 2;
+    double current_res_km = haversine_formula(tile->max_north, tile->max_west,
+                                               tile->max_north, tile->min_west);
+    tile->precise_resolution = current_res_km / MAX(tile->width, tile->height) * 1000.0;
+    tile->resolution = tile->precise_resolution < 0.5f ?
+                       0.5f : ceil((tile->precise_resolution * 2.0) + 0.5) / 2.0;
 
-    tile->width_deg  = tile->max_west - tile->min_west >= 0 ? tile->max_west - tile->min_west : tile->max_west + (360 - tile->min_west);
+    tile->width_deg  = tile->max_west - tile->min_west >= 0 ?
+                       tile->max_west - tile->min_west :
+                       tile->max_west + (360.0 - tile->min_west);
     tile->height_deg = tile->max_north - tile->min_north;
     tile->ppdx = tile->width  / tile->width_deg;
     tile->ppdy = tile->height / tile->height_deg;
 
     if (debug) {
-        fprintf(stderr, "Loaded GeoTIFF %s %dx%d cellsize(deg)=%.9f res=%.2fm\n",
-                filename, tile->width, tile->height, tile->cellsize, tile->resolution);
+        fprintf(stderr, "Loaded GDAL %s %dx%d cellsize(deg)=%.9f res=%.2fm warped=%d\n",
+                filename, tile->width, tile->height, tile->cellsize, tile->resolution,
+                (int)warped);
         fflush(stderr);
     }
 

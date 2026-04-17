@@ -20,7 +20,7 @@ int LoadLossColors(struct site xmtr);
 int LoadDBMColors(struct site xmtr);
 int LoadTopoData(double max_lon, double min_lon, double max_lat, double min_lat);
 int LoadUDT(char *filename);
-int loadLIDAR(char *filename, int resample);
+int loadLIDAR(char *filename, int resample, double tx_lat, double tx_lon_west, double radius_miles);
 int loadClutter(char *filename, double radius, struct site tx);
 int averageHeight(int h, int w, int x, int y);
 static const char AZ_FILE_SUFFIX[] = ".az";

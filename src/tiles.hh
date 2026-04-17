@@ -42,7 +42,7 @@ typedef struct _tile_t{
 } tile_t, *ptile_t;
 
 int tile_load_lidar(tile_t*, char *);
-int tile_load_geotiff(tile_t*, char *);
+int tile_load_geotiff(tile_t*, char *, int resample_factor = 1);
 int tile_rescale(tile_t *, float);
 void tile_destroy(tile_t *);
 
