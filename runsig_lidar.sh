@@ -31,23 +31,26 @@ fi
 # ---------- Parsear argumentos ----------
 OUTPATH="" TX_LAT="" TX_LON="" TX_H="" RX_LAT="" RX_LON="" RX_H=""
 PPA=0 METRIC=0 COVERAGE=0 TX_NAME="" RX_NAME="" RADIUS=""
+COV_RESAMPLE="" COV_PM=""
 
 args=("$@")
 for i in "${!args[@]}"; do
     val="${args[$((i+1))]:-}"
     case "${args[$i]}" in
-        -o)        OUTPATH="$val"       ;;
-        -lat)      TX_LAT="$val"        ;;
-        -lon)      TX_LON="$val"        ;;
-        -txh)      TX_H="$val"          ;;
-        -rla)      RX_LAT="$val"; PPA=1 ;;
-        -rlo)      RX_LON="$val"        ;;
-        -rxh)      RX_H="$val"          ;;
-        -m)        METRIC=1             ;;
-        -coverage) COVERAGE=1           ;;
-        -txn)      TX_NAME="$val"       ;;
-        -rxn)      RX_NAME="$val"       ;;
-        -R)        RADIUS="$val"        ;;
+        -o)           OUTPATH="$val"       ;;
+        -lat)         TX_LAT="$val"        ;;
+        -lon)         TX_LON="$val"        ;;
+        -txh)         TX_H="$val"          ;;
+        -rla)         RX_LAT="$val"; PPA=1 ;;
+        -rlo)         RX_LON="$val"        ;;
+        -rxh)         RX_H="$val"          ;;
+        -m)           METRIC=1             ;;
+        -coverage)    COVERAGE=1           ;;
+        -txn)         TX_NAME="$val"       ;;
+        -rxn)         RX_NAME="$val"       ;;
+        -R)           RADIUS="$val"        ;;
+        -covresample) COV_RESAMPLE="$val"  ;;
+        -covpm)       COV_PM="$val"        ;;
     esac
 done
 
@@ -70,8 +73,9 @@ skip_next=0
 for i in "${!args[@]}"; do
     if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
     case "${args[$i]}" in
-        -coverage)   ;;                    # solo script, sin valor
-        -txn|-rxn|-R) skip_next=1 ;;      # solo script / se añade abajo
+        -coverage)              ;;                    # solo script, sin valor
+        -txn|-rxn|-R)           skip_next=1 ;;        # solo script / se añade abajo
+        -covresample|-covpm)    skip_next=1 ;;        # solo script
         -o)          BINARY_ARGS+=("${args[$i]}" "$OUTPATH"); skip_next=1 ;;
         *)           BINARY_ARGS+=("${args[$i]}") ;;
     esac
@@ -101,11 +105,21 @@ skip_next=0
 for i in "${!BINARY_ARGS[@]}"; do
     if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
     case "${BINARY_ARGS[$i]}" in
-        -rla|-rlo|-rxh|-R)  skip_next=1 ;;
-        *)                  COV_ARGS+=("${BINARY_ARGS[$i]}") ;;
+        -rla|-rlo|-rxh|-R|-resample)  skip_next=1 ;;
+        *)                            COV_ARGS+=("${BINARY_ARGS[$i]}") ;;
     esac
 done
 [[ -n "$RADIUS" ]] && COV_ARGS+=("-R" "$RADIUS")
+
+# Resample para cobertura: si el usuario pasó -covresample úsalo;
+# si no, aplica 5 por defecto (25m efectivo en MDT de 5m → 25× más rápido).
+# Pasar -covresample 1 desactiva el resample.
+_COV_RESAMPLE="${COV_RESAMPLE:-5}"
+[[ "$_COV_RESAMPLE" -gt 1 ]] 2>/dev/null && COV_ARGS+=("-resample" "$_COV_RESAMPLE")
+
+# Modelo de propagación para cobertura (opcional, independiente del P2P):
+# -covpm 1=ITM (preciso, lento), 3=Hata, 6=COST-Hata, 7=FSPL (rápido).
+[[ -n "$COV_PM" ]] && COV_ARGS+=("-pm" "$COV_PM")
 
 # ---------- Filtro de mensajes ruidosos del binario ----------
 # Suprime líneas de carga/reproyección/depuración internas; conserva errores y warnings.
@@ -386,50 +400,20 @@ GNUPLOT_EOF
     # Eliminar archivos intermedios _abs (solo se usan como input de gnuplot)
     rm -f "$GP_TERRAIN" "$GP_LOS" "$GP_F1" "$GP_F60"
 
-    # -------- Generar HTML report (perfil base64 + informe de texto) --------
-    # Google Earth Desktop bloquea TODAS las referencias locales de imágenes en
-    # globos de descripción (base64, files/ KMZ, file:///). La solución es
-    # generar un HTML autocontenido con la imagen embebida en base64 y poner
-    # un enlace clickable en la descripción KML que abre ese HTML en el navegador.
-    REPORT_HTML="${OUTPATH}_report.html"
-    REPORT_HTML_URL=""
-    if [[ -f "$PROFILE_PNG" ]]; then
-        _PNG_B64="$(base64 -w0 "$PROFILE_PNG")"
-        cat > "$REPORT_HTML" <<HTML_EOF
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8">
-<title>${BASENAME} - Profile Report</title>
-<style>
-body{font-family:sans-serif;padding:20px;max-width:900px;margin:0 auto;}
-h2{color:#333;}
-img{max-width:100%;height:auto;border:1px solid #ddd;border-radius:4px;}
-pre{background:#f5f5f5;padding:15px;border-radius:4px;overflow:auto;font-size:12px;line-height:1.4;}
-</style>
-</head>
-<body>
-<h2>${BASENAME} — Site to Site Analysis</h2>
-<img src="data:image/png;base64,${_PNG_B64}" alt="Terrain Profile"/>
-<h3>Link Report</h3>
-<pre>$(cat "${OUTPATH}.txt")</pre>
-</body>
-</html>
-HTML_EOF
-        # Convertir ruta WSL a URL Windows para que el enlace funcione en GE Desktop
-        if [[ "$REPORT_HTML" =~ ^/mnt/([a-zA-Z])/(.*) ]]; then
-            _drive="${BASH_REMATCH[1]^^}"
-            _rest="${BASH_REMATCH[2]}"
-            REPORT_HTML_URL="file:///${_drive}:/${_rest}"
-        else
-            REPORT_HTML_URL="file://${REPORT_HTML}"
-        fi
-    fi
+    # -------- Preparar descripción compartida --------
+    # En KMZ, las imágenes en globos de descripción se referencian como
+    # "files/nombre.png" (ruta relativa desde doc.kml en la raíz del ZIP).
+    # GE Desktop resuelve correctamente estas rutas cuando el KML raíz
+    # se llama "doc.kml" (convención estándar de KMZ).
+    PROFILE_IMG_REF=""
+    [[ -f "$PROFILE_PNG" ]] && PROFILE_IMG_REF="files/$(basename "$PROFILE_PNG")"
+
     TXT_HTML="$(sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "${OUTPATH}.txt")"
 
-    # Emite el HTML de descripción a stdout (enlace al report + informe completo)
+    # Emite el HTML de descripción a stdout (imagen + informe completo)
     write_full_desc() {
-        [[ -n "$REPORT_HTML_URL" ]] && \
-            printf '<a href="%s"><b>&#128247; Open Profile Chart</b></a><br/><br/>' "$REPORT_HTML_URL"
+        [[ -n "$PROFILE_IMG_REF" ]] && \
+            printf '<img src="%s" width="560"/><br/><br/>' "$PROFILE_IMG_REF"
         printf '<pre>'
         printf '%s' "$TXT_HTML"
         printf '</pre>'
@@ -560,12 +544,11 @@ for lat,lon,dist,elev in m:
     # -------- Crear KMZ --------
     KMZ_TMP="$(mktemp -d)"
     mkdir -p "${KMZ_TMP}/files"
-    cp "${OUTPATH}.kml"  "${KMZ_TMP}/${BASENAME}.kml"
+    # El KML raíz debe llamarse doc.kml para que GE resuelva rutas "files/..." en descripciones
+    cp "${OUTPATH}.kml"  "${KMZ_TMP}/doc.kml"
     cp "${OUTPATH}.txt"  "${KMZ_TMP}/${BASENAME}.txt"
     cp "${OUTPATH}.json" "${KMZ_TMP}/${BASENAME}.json"
-    # Profile PNG va en files/ para que la referencia en el KML funcione en GE
-    [[ -f "$PROFILE_PNG" ]]              && cp "$PROFILE_PNG"  "${KMZ_TMP}/files/"
-    [[ -f "$REPORT_HTML" ]]              && cp "$REPORT_HTML" "${KMZ_TMP}/files/"
+    [[ -f "$PROFILE_PNG" ]]              && cp "$PROFILE_PNG" "${KMZ_TMP}/files/"
     [[ -n "$COV_PNG" && -f "$COV_PNG" ]] && cp "$COV_PNG"     "${KMZ_TMP}/files/"
     (cd "$KMZ_TMP" && zip -qr "${OUTPATH}.kmz" .)
     rm -rf "$KMZ_TMP"
@@ -576,7 +559,6 @@ for lat,lon,dist,elev in m:
     echo "  ${OUTPATH}.json"
     echo "  ${OUTPATH}.dcf"
     [[ -f "$PROFILE_PNG" ]]              && echo "  ${PROFILE_PNG}"
-    [[ -f "$REPORT_HTML" ]]              && echo "  ${REPORT_HTML}"
     [[ -n "$COV_PNG" && -f "$COV_PNG" ]] && echo "  ${COV_PNG}  (coverage / Plot)"
     [[ -f "${OUTPATH}.tiff" ]]           && echo "  ${OUTPATH}.tiff"
     echo "  ${OUTPATH}.kmz"
@@ -635,4 +617,30 @@ RX_LABEL="${RX_NAME:-RX}"
             "$TX_LON" "$TX_LAT"
     fi
     if [[ -n "$RX_LAT" && -n "$RX_LON" ]]; then
-       
+        printf '  <Placemark>\n    <name>%s</name>\n' "$RX_LABEL"
+        printf '    <Style><IconStyle><color>ff0000ff</color><scale>1.3</scale>'
+        printf '<Icon><href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href></Icon>'
+        printf '</IconStyle></Style>\n'
+        printf '    <Point><coordinates>%s,%s,0</coordinates></Point>\n  </Placemark>\n' \
+            "$RX_LON" "$RX_LAT"
+    fi
+    printf '</Document>\n</kml>\n'
+} > "${OUTPATH}.kml"
+
+# KMZ con estructura files/
+KMZ_TMP="$(mktemp -d)"
+mkdir -p "${KMZ_TMP}/files"
+cp "${OUTPATH}.kml" "${KMZ_TMP}/${BASENAME}.kml"
+cp "${OUTPATH}.png" "${KMZ_TMP}/files/${BASENAME}.png"
+(cd "$KMZ_TMP" && zip -qr "${OUTPATH}.kmz" .)
+rm -rf "$KMZ_TMP"
+
+echo ""
+echo "Archivos generados:"
+echo "  ${OUTPATH}.ppm"
+echo "  ${OUTPATH}.png"
+echo "  ${OUTPATH}.tiff"
+echo "  ${OUTPATH}.dcf"
+echo "  ${OUTPATH}.kml"
+echo "  ${OUTPATH}.kmz  <- Google Earth"
+echo "Bounding box: N=${NORTH} E=${EAST} S=${SOUTH} W=${WEST}"
