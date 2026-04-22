@@ -15,3 +15,4 @@ data/SRTM3/*
 
 # antenna radiation pattern diagrams
 antenna/*
+DTM_models/ 
