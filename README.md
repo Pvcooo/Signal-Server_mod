@@ -1,6 +1,6 @@
 # Signal-Server_mod
 
-Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagation simulator adapted for high-resolution LiDAR/GeoTIFF terrain data (EPSG:25830).
+Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagation simulator adapted for high-resolution LiDAR/GeoTIFF terrain data (EPSG:25830). To work properly, it's necessary to have the Digital Terrain Models archives in the Signal-Server_mod/utils/DTM_models directory.
 
 ---
 
