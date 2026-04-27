@@ -21,7 +21,7 @@ case "$(head -1 "$0" | cat -A)" in *'^M'*) sed -i 's/\r//' "$0"; exec bash "$0" 
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="${SCRIPTDIR}/src/signalserverLIDAR"
-DTM_DIR="${SCRIPTDIR}/DTM_models"
+DTM_DIR="${SCRIPTDIR}/utils/DTM_models"
 
 if [[ $# -eq 0 ]]; then
     echo "Uso: $0 [opciones] -o RUTA_SALIDA"
