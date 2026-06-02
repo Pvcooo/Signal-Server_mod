@@ -125,13 +125,17 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
 ### Examples
 **Point-to-point only:**
 ```bash
-./runsig_lidar.sh \
-  -lat 42.7356 -lon -1.7424 -txh 6 \
-  -rla 42.6931 -rlo -1.7672 -rxh 2 \
-  -f 2450 -erp 10 -m \
-  -txn "Site A" -rxn "Site B" \
-  -o /results/Link_AB/Link_AB
+./runsig_lidar.sh \ 
+  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi -rxg 6.86 \
+  -lat 64.31920992106285 -lon -15.239195936909075 \
+  -rla 64.28813853450863 -rlo -15.146888767722631 \
+  -txh 2.75 -rxh 1.5 -txn "Site A" -rxn "Site B" \
+  -f 2450 -erp 61 -R 15 \
+  -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
+  -dbm -m -resample 2 \
+  -o C:/Users/Adminlocal/Desktop/results/Link_AB
 ```
+
 
 **P2P + coverage overlay (fast):**
 ```bash
@@ -144,13 +148,29 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
   -o /results/Link_AB/Link_AB
 ```
 
+```bash
+./runsig_lidar.sh \ 
+  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi -rxg 6.86 \
+  -lat 64.31920992106285 -lon -15.239195936909075 \
+  -rla 64.28813853450863 -rlo -15.146888767722631 \
+  -txh 2.75 -rxh 1.5 -txn "Site A" -rxn "Site B" \
+  -f 2450 -erp 61 -R 15 \
+  -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
+  -dbm -m -resample 2 \
+  -coverage -covresample 2 \
+  -o C:/Users/Adminlocal/Desktop/results/Link_AB_coverage
+```
+
 **Area coverage only:**
 ```bash
-./runsig_lidar.sh \
-  -lat 42.7356 -lon -1.7424 -txh 30 \
-  -f 800 -erp 50 -m -R 30 \
-  -txn "Base Station" \
-  -o /results/Coverage_BS/Coverage_BS
+./runsig_lidar.sh \ 
+  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi \
+  -lat 64.31920992106285 -lon -15.239195936909075 \
+  -txh 1.75 -txn "Base Station" \
+  -f 2450 -erp 61 -R 15 \
+  -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
+  -dbm -m -resample 2 \
+  -o C:/Users/Adminlocal/Desktop/results/Coverage_BS
 ```
 
 ---
