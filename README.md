@@ -137,17 +137,7 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
 ```
 
 
-**P2P + coverage overlay (fast):**
-```bash
-./runsig_lidar.sh \
-  -lat 42.7356 -lon -1.7424 -txh 6 \
-  -rla 42.6931 -rlo -1.7672 -rxh 2 \
-  -f 2450 -erp 10 -m \
-  -txn "Site A" -rxn "Site B" \
-  -coverage -R 15 -covpm 3 -covresample 5 \
-  -o /results/Link_AB/Link_AB
-```
-
+**P2P + coverage overlay:**
 ```bash
 ./runsig_lidar.sh \ 
   -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi -rxg 6.86 \
