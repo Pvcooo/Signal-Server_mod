@@ -1333,23 +1333,20 @@ int main(int argc, char *argv[])
 				strncpy(tx_site[0].filename, argv[z], 253);
 				/* Antenna pattern files have the same basic name as the output file
 				 * but with a different extension. If they exist, load them now */
-				if( (az_filename = (char*) calloc(strlen(argv[z]) + strlen(AZ_FILE_SUFFIX) + 1, sizeof(char))) == NULL )
+				{
+				const char *ant_base = (antenna_file[0] != '\0') ? antenna_file : argv[z];
+				if( (az_filename = (char*) calloc(strlen(ant_base) + strlen(AZ_FILE_SUFFIX) + 1, sizeof(char))) == NULL )
 					return ENOMEM;
-				if (antenna_file[0] != '\0')
-				        strcpy(az_filename, antenna_file);
-				else
-				        strcpy(az_filename, argv[z]);
+				strcpy(az_filename, ant_base);
 				strcat(az_filename, AZ_FILE_SUFFIX);
 
-				if( (el_filename = (char*) calloc(strlen(argv[z]) + strlen(EL_FILE_SUFFIX) + 1, sizeof(char))) == NULL ){
+				if( (el_filename = (char*) calloc(strlen(ant_base) + strlen(EL_FILE_SUFFIX) + 1, sizeof(char))) == NULL ){
 					free(az_filename);
 					return ENOMEM;
 				}
-				if (antenna_file[0] != '\0')
-				        strcpy(el_filename, antenna_file);
-				else
-				        strcpy(el_filename, argv[z]);
+				strcpy(el_filename, ant_base);
 				strcat(el_filename, EL_FILE_SUFFIX);
+				}
 
 				if( (result = LoadPAT(az_filename,el_filename)) != 0 ){
 					fprintf(stderr,"Permissions error reading antenna pattern file\n");
@@ -2041,18 +2038,18 @@ int main(int argc, char *argv[])
 
 			if (cropping) {
 				// CROPPING Factor determined in propPathLoss().
-				// cropLon is the circle radius in pixels at it's widest (east/west) 
+				// cropLon is the circle radius in pixels at it's widest (east/west)
 				cropLon*=dpp; // pixels to degrees
 				max_north=cropLat; // degrees
 				max_west=cropLon+tx_site[0].lon; // degrees west (positive)
 				cropLat-=tx_site[0].lat; // angle from tx to edge
 
-			
+
 				if (debug) {
 					fprintf(stderr,"Cropping 1: max_west: %.4f cropLat: %.4f cropLon: %.4f longitude: %.5f dpp %.7f\n",max_west,cropLat,cropLon,tx_site[0].lon,dpp);
 					fflush (stderr);
 				}
-				width=(int)((cropLon*ppd)*2);
+				width=(int)((cropLon*yppd)*2);
 				height=(int)((cropLat*ppd)*2);
 
 				if (debug) {

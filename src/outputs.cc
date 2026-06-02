@@ -96,7 +96,7 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 	for (y = 0, lat = north; y < (int)height;
 	     y++, lat = north - (dpp * (double)y)) {
 		for (x = 0, lon = max_west; x < (int)width;
-		     x++, lon = max_west - (dpp * (double)x)) {
+		     x++, lon = max_west - ((double)x / yppd)) {
 			if (lon < 0.0)
 				lon += 360.0;
 
@@ -106,7 +106,7 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 					       (lat -
 						(double)dem[indx].min_north));
 				y0 = mpi -
-				    (int)rint(ppd *
+				    (int)rint(yppd *
 					      (LonDiff
 					       ((double)dem[indx].max_west,
 						lon)));
@@ -336,7 +336,7 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 	for (y = 0, lat = north; y < (int)height;
 	     y++, lat = north - (dpp * (double)y)) {
 		for (x = 0, lon = max_west; x < (int)width;
-		     x++, lon = max_west - (dpp * (double)x)) {
+		     x++, lon = max_west - ((double)x / yppd)) {
 			if (lon < 0.0)
 				lon += 360.0;
 
@@ -346,7 +346,7 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 					       (lat -
 						(double)dem[indx].min_north));
 				y0 = mpi -
-				    (int)rint(ppd *
+				    (int)rint(yppd *
 					      (LonDiff
 					       ((double)dem[indx].max_west,
 						lon)));
@@ -588,7 +588,7 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 	for (y = 0, lat = north; y < (int)height;
 	     y++, lat = north - (dpp * (double)y)) {
 		for (x = 0, lon = max_west; x < (int)width;
-		     x++, lon = max_west - (dpp * (double)x)) {
+		     x++, lon = max_west - ((double)x / yppd)) {
 			if (lon < 0.0)
 				lon += 360.0;
 
@@ -597,9 +597,9 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 
 				x0 = (int)rint((ppd *
 					      (lat -
-						(double)dem[indx].min_north))); 
+						(double)dem[indx].min_north)));
 				y0 = mpi -
-				    (int)rint(ppd * 
+				    (int)rint(yppd *
 					      (LonDiff
 					       ((double)dem[indx].max_west,lon)));
 
@@ -828,7 +828,7 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 	for (y = 0, lat = north; y < (int)height;
 	     y++, lat = north - (dpp * (double)y)) {
 		for (x = 0, lon = max_west; x < (int)width;
-		     x++, lon = max_west - (dpp * (double)x)) {
+		     x++, lon = max_west - ((double)x / yppd)) {
 			if (lon < 0.0)
 				lon += 360.0;
 
@@ -838,7 +838,7 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 					       (lat -
 						(double)dem[indx].min_north));
 				y0 = mpi -
-				    (int)rint(ppd *
+				    (int)rint(yppd *
 					      (LonDiff
 					       ((double)dem[indx].max_west,
 						lon)));

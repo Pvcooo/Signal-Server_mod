@@ -383,8 +383,15 @@ JSON_EOF
         [[ -f "$GP_F1"  ]] && PLOT_CMD+=", \"${GP_F1}\"  using 1:2 with lines lw 1 lc 'green' title 'First Fresnel Zone (100%)'"
         [[ -f "$GP_F60" ]] && PLOT_CMD+=", \"${GP_F60}\" using 1:2 with lines lw 1 lc 'red'   title 'First Fresnel Zone (60%)'"
 
+        # pngcairo requires libcairo support; fall back to the basic png terminal
+        if gnuplot -e "set terminal pngcairo" 2>/dev/null; then
+            _GP_TERM='pngcairo size 800,450 background "white" font "sans,10"'
+        else
+            _GP_TERM='png size 800,450'
+        fi
+
         cat > "$GPLOT_SCRIPT" <<GNUPLOT_EOF
-set terminal pngcairo size 800,450 background "white" font "sans,10"
+set terminal ${_GP_TERM}
 set output "${PROFILE_PNG}"
 set title "Site to Site Analysis"
 set xlabel "Distance (km)"
@@ -394,19 +401,18 @@ set grid
 set style fill transparent solid 0.7 noborder
 plot ${PLOT_CMD}
 GNUPLOT_EOF
-        gnuplot "$GPLOT_SCRIPT" 2>/dev/null || echo "AVISO: gnuplot no pudo generar el perfil" >&2
+        gnuplot "$GPLOT_SCRIPT" 2>&1 | grep -v '^$' >&2 || true
+        [[ -f "$PROFILE_PNG" ]] || echo "AVISO: gnuplot no generó el perfil (verifica que gnuplot esté instalado)" >&2
         rm -f "$GPLOT_SCRIPT"
     fi
     # Eliminar archivos intermedios _abs (solo se usan como input de gnuplot)
     rm -f "$GP_TERRAIN" "$GP_LOS" "$GP_F1" "$GP_F60"
 
     # -------- Preparar descripción compartida --------
-    # En KMZ, las imágenes en globos de descripción se referencian como
-    # "files/nombre.png" (ruta relativa desde doc.kml en la raíz del ZIP).
-    # GE Desktop resuelve correctamente estas rutas cuando el KML raíz
-    # se llama "doc.kml" (convención estándar de KMZ).
+    # GE no resuelve rutas "files/..." en CDATA de forma fiable en todas las
+    # versiones. Se incrusta la imagen como data URI base64 para evitar el problema.
     PROFILE_IMG_REF=""
-    [[ -f "$PROFILE_PNG" ]] && PROFILE_IMG_REF="files/$(basename "$PROFILE_PNG")"
+    [[ -f "$PROFILE_PNG" ]] && PROFILE_IMG_REF="data:image/png;base64,$(base64 -w 0 "$PROFILE_PNG")"
 
     TXT_HTML="$(sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "${OUTPATH}.txt")"
 
@@ -579,15 +585,28 @@ if [[ ! -f "$PPM" ]]; then
     echo "ERROR: fichero PPM no encontrado: $PPM" >&2; rm -f "$TMPLOG"; exit 1
 fi
 
-convert "$PPM" -transparent white "${OUTPATH}.png"
-convert "$PPM" "${OUTPATH}.tiff"
+# PNG: límite de 8192 px (GE no aprovecha más en un GroundOverlay) para evitar
+# el agotamiento de caché de ImageMagick en imágenes de alta resolución.
+# '8192x8192>' solo escala si la imagen es más grande; mantiene la relación de aspecto.
+if ! convert -limit memory 2GiB -limit disk 32GiB \
+        "$PPM" -resize '8192x8192>' -transparent white "${OUTPATH}.png" 2>&1; then
+    echo "AVISO: conversión PNG fallida. Prueba a reducir la resolución con -resample." >&2
+    rm -f "${OUTPATH}.png"
+fi
+
+# TIFF: resolución completa con compresión LZW para uso GIS
+if ! convert -limit memory 2GiB -limit disk 32GiB -compress LZW \
+        "$PPM" "${OUTPATH}.tiff" 2>&1; then
+    echo "AVISO: conversión TIFF fallida." >&2
+    rm -f "${OUTPATH}.tiff"
+fi
 
 BBOX="$(grep '^|' "$TMPLOG" | tail -1)" || true
 rm -f "$TMPLOG"
 
 if [[ -z "$BBOX" ]]; then
     echo "AVISO: bounding box no encontrado. KMZ no generado." >&2
-    echo "Archivos generados: ${OUTPATH}.ppm  ${OUTPATH}.png  ${OUTPATH}.tiff  ${OUTPATH}.dcf" >&2
+    echo "Archivos generados: ${OUTPATH}.ppm  ${OUTPATH}.dcf" >&2
     exit 0
 fi
 
@@ -602,12 +621,14 @@ RX_LABEL="${RX_NAME:-RX}"
 {
     printf '<?xml version="1.0" encoding="UTF-8"?>\n'
     printf '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document><name>%s</name>\n' "$BASENAME"
-    printf '  <GroundOverlay>\n    <name>Plot</name>\n'
-    printf '    <Icon><href>files/%s.png</href></Icon>\n' "$BASENAME"
-    printf '    <LatLonBox>\n'
-    printf '      <north>%s</north>\n      <east>%s</east>\n' "$NORTH" "$EAST"
-    printf '      <south>%s</south>\n      <west>%s</west>\n' "$SOUTH" "$WEST"
-    printf '    </LatLonBox>\n  </GroundOverlay>\n'
+    if [[ -f "${OUTPATH}.png" ]]; then
+        printf '  <GroundOverlay>\n    <name>Plot</name>\n'
+        printf '    <Icon><href>files/%s.png</href></Icon>\n' "$BASENAME"
+        printf '    <LatLonBox>\n'
+        printf '      <north>%s</north>\n      <east>%s</east>\n' "$NORTH" "$EAST"
+        printf '      <south>%s</south>\n      <west>%s</west>\n' "$SOUTH" "$WEST"
+        printf '    </LatLonBox>\n  </GroundOverlay>\n'
+    fi
     if [[ -n "$TX_LAT" && -n "$TX_LON" ]]; then
         printf '  <Placemark>\n    <name>%s</name>\n' "$TX_LABEL"
         printf '    <Style><IconStyle><color>ff00ff00</color><scale>1.3</scale>'
@@ -631,15 +652,15 @@ RX_LABEL="${RX_NAME:-RX}"
 KMZ_TMP="$(mktemp -d)"
 mkdir -p "${KMZ_TMP}/files"
 cp "${OUTPATH}.kml" "${KMZ_TMP}/${BASENAME}.kml"
-cp "${OUTPATH}.png" "${KMZ_TMP}/files/${BASENAME}.png"
+[[ -f "${OUTPATH}.png" ]] && cp "${OUTPATH}.png" "${KMZ_TMP}/files/${BASENAME}.png"
 (cd "$KMZ_TMP" && zip -qr "${OUTPATH}.kmz" .)
 rm -rf "$KMZ_TMP"
 
 echo ""
 echo "Archivos generados:"
 echo "  ${OUTPATH}.ppm"
-echo "  ${OUTPATH}.png"
-echo "  ${OUTPATH}.tiff"
+[[ -f "${OUTPATH}.png"  ]] && echo "  ${OUTPATH}.png"
+[[ -f "${OUTPATH}.tiff" ]] && echo "  ${OUTPATH}.tiff"
 echo "  ${OUTPATH}.dcf"
 echo "  ${OUTPATH}.kml"
 echo "  ${OUTPATH}.kmz  <- Google Earth"
