@@ -10,8 +10,9 @@ region="Eurasia/"
 #region="North_America/"
 #region="South_America/"
 
-srtm3Dir="data/SRTM3/"
-srtm2sdfDir="utils/sdf/"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+srtm3Dir="$ROOT/data/srtm3/"
+srtm2sdfDir="$ROOT/tools/sdf/"
 
 #north bounds of height data to download
 #for north in {44..55}
@@ -31,7 +32,7 @@ unzip "${srtm3Dir}*.hgt.zip" -d $srtm3Dir
 
 for file in "${srtm3Dir}"*.hgt
 do
-	./${srtm2sdfDir}srtm2sdf "$file" >> results.out
+	"${srtm2sdfDir}srtm2sdf" "$file" >> results.out
 done
 
 mv *.sdf $srtm3Dir

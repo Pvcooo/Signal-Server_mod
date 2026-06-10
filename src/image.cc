@@ -1,10 +1,4 @@
-/*
- * Generic image output handling. This feature allows
- * for extensible image output formats and permits for
- * cleaner image rendering code in the model generation
- * routines by moving all of the file-format specific
- * logic to be handled here.
- */
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -22,11 +16,6 @@ int load_library(image_dispatch_table_t *dt);
 static int default_format = IMAGE_PPM;
 char *dynamic_backend = NULL;
 
-/*
- * image_set_format
- * Changes the default format for the next
- * uninitialized image canvas
- */
 int image_set_format(int format){
 	if(format <= IMAGE_DEFAULT || format >= IMAGE_FORMAT_MAX)
 		return EINVAL;
@@ -34,11 +23,6 @@ int image_set_format(int format){
 	return 0;
 }
 
-/*
- * image_init
- * Initialize an image context. Must be called
- * before attempting to write any image data
- */
 int image_init(image_ctx_t *ctx, \
 				const size_t width, \
 				const size_t height, \
@@ -48,7 +32,6 @@ int image_init(image_ctx_t *ctx, \
 	int success = 0;
 	image_dispatch_table_t *dt;
 
-	/* Perform some sanity checking on provided arguments */
 	if(ctx == NULL)
 		return EINVAL;
 	if(width == 0 || height == 0)
@@ -60,7 +43,6 @@ int image_init(image_ctx_t *ctx, \
 
 	memset(ctx,0x00,sizeof(image_ctx_t));
 
-	/* Assign the initialize values to the processing context */
 	ctx->width = width;
 	ctx->height = height;
 	ctx->model = model;
@@ -69,7 +51,6 @@ int image_init(image_ctx_t *ctx, \
 	else
 		ctx->format = format;
 
-	/* Get the dispatch table for this image format */
 	dt = (image_dispatch_table_t *) calloc(1,sizeof(image_dispatch_table_t));
 	if(dt == NULL){
 		fprintf(stderr,"Error allocating dispatch table\n");
@@ -83,7 +64,6 @@ int image_init(image_ctx_t *ctx, \
 	}
 	ctx->_dt = (void*)dt;
 
-	/* Call the format-specific initialization function */
 	success = dt->init(ctx);
 	if(success != 0){
 		fprintf(stderr,"Error initializing image context\n");
@@ -95,12 +75,7 @@ int image_init(image_ctx_t *ctx, \
 
 	return success;
 }
-/*
- * image_add_pixel, image_set_pixel, image_get_pixel, image_write, image_free
- * Various setters ad getters for assigning pixel data. image_write
- * takes an open file handle and writes image data to it.
- * These functions simply wrap the underlying format-specific functions
- */
+
 int image_add_pixel(image_ctx_t *ctx, const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a){
 	if(ctx->initialized != 1) return EINVAL;
 	return DISPATCH_TABLE(ctx)->add_pixel(ctx,r,g,b,a);
@@ -108,7 +83,7 @@ int image_add_pixel(image_ctx_t *ctx, const uint8_t r, const uint8_t g, const ui
 int image_set_pixel(image_ctx_t *ctx, const size_t x, const size_t y, const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t a){
 	size_t block_size;
 	if(ctx->initialized != 1) return EINVAL;
-	/* Image format handlers have the option to specify a _set_pixel handler */
+
 	if(DISPATCH_TABLE(ctx)->set_pixel != NULL){
 		return DISPATCH_TABLE(ctx)->set_pixel(ctx,x,y,r,g,b,a);
 	}
@@ -134,12 +109,6 @@ void image_free(image_ctx_t *ctx){
 	if(ctx->canvas != NULL) free(ctx->canvas);
 }
 
-/*
- * image_get_filename
- * Creates an appropriate file name using data supplied
- * by the user. If the extension is already correct, return
- * that; if not append if there is space
- */
 int image_get_filename(image_ctx_t *ctx, char *out, size_t len_out, char *in){
 	size_t len_src;
 	size_t len_ext;
@@ -148,7 +117,6 @@ int image_get_filename(image_ctx_t *ctx, char *out, size_t len_out, char *in){
 	if(ctx->initialized != 1)
 		return EINVAL;
 
-	/* Get various lengths */
 	len_src = strlen(in);
 	len_ext = strlen(ctx->extension);
 
@@ -158,31 +126,26 @@ int image_get_filename(image_ctx_t *ctx, char *out, size_t len_out, char *in){
 	}
 
 	if(len_src > len_ext && strcmp(in+len_src-len_ext,ctx->extension) == 0){
-		/* Already has correct extension and fits in buffer */
+
 		if(len_src < len_out)
 			strncpy(in,out,len_out);
 		else
 			success = ENOMEM;
 	}else if(len_src > len_ext){
-		/* Doesn't have correct extension and fits */
+
 		if(len_src + len_ext < len_out){
 			strncpy(out,in,len_out);
 			strncat(out,ctx->extension,len_out);
 		}else
 			success = ENOMEM;
 	}else{
-		/* The input buffer plus an extension cannot fit in the output buffer */
+
 		fprintf(stderr,"Error building image output filename\n");
 		success = ENOMEM;
 	}
 	return success;
 }
 
-/*
- * get_dt
- * Load the dispatch table for the specified image
- * format. Currently only pixmap supported.
- */
 int get_dt(image_dispatch_table_t *dt, int format){
 	int success = 0;
 
@@ -200,17 +163,6 @@ int get_dt(image_dispatch_table_t *dt, int format){
 	return success;
 }
 
-/*
- * ==WARNING==: Here be dragons!
- * Experimantal features beyond this point.
- * Only use if you are sure you know what you
- * are doing!
- */
-
-/*
- * image_set_library
- * Set the library to use for generating images
- */
 int image_set_library(char *library){
 	char *libname;
 	size_t length;
@@ -225,38 +177,26 @@ int image_set_library(char *library){
 	default_format = IMAGE_LIBRARY;
 	return 0;
 }
-/*
- * image_get_library
- * Returns the current saved image rendering
- * library
- */
+
 char* image_get_library(){
 	return dynamic_backend;
 }
 
-/* 
- * load_library
- * External image processing: experimental feature
- * Load an external library to perform image processing
- * It must be a custom compatible library
- */
 int load_library(image_dispatch_table_t *dt){
 	void *hndl;
 	int success = 0;
 
-	/* Validate object file */
 	if(dynamic_backend == NULL || strlen(dynamic_backend) == 0){
 		fprintf(stderr,"Custom image processor requested without specification\n");
 		return EINVAL;
 	}
-	
-	/* Load shared object and locate required exports */
+
 	hndl = dlopen(dynamic_backend,RTLD_LAZY);
 	if(hndl == NULL){
 		fprintf(stderr,"Error loading shared object\n");
 		return EINVAL;
 	}
-	/* Perform symbol lookup */
+
 	if((dt->init = (_init*)dlsym(hndl,"lib_init")) == NULL ||
 		(dt->add_pixel = (_add_pixel*)dlsym(hndl,"lib_add_pixel")) == NULL ||
 		(dt->write = (_write*)dlsym(hndl,"lib_write")) == NULL){
@@ -264,7 +204,7 @@ int load_library(image_dispatch_table_t *dt){
 		success = EINVAL;
 		(void) dlclose(hndl);
 	}
-	/* Lookup optional symbols, these can return NULL */
+
 	if(success == 0){
 		dt->get_pixel = (_get_pixel*)dlsym(hndl,"lib_get_pixel");
 		dt->set_pixel = (_set_pixel*)dlsym(hndl,"lib_set_pixel");

@@ -3,4 +3,4 @@
 
 double PlaneEarthLoss(float d, float TxH, float RxH);
 
-#endif /* _PEL_HH_ */
+#endif

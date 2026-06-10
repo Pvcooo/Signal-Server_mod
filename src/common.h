@@ -134,4 +134,4 @@ extern struct region region;
 
 extern int debug;
 
-#endif /* _COMMON_H_ */
+#endif

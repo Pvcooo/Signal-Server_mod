@@ -1,6 +1,6 @@
 # Signal-Server_mod
 
-Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagation simulator adapted for high-resolution LiDAR/GeoTIFF terrain data (EPSG:25830). To work properly, it's necessary to have the Digital Terrain Models files in the Signal-Server_mod/utils/DTM_models directory.
+Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagation simulator adapted for high-resolution LiDAR/GeoTIFF terrain data (EPSG:25830). To work properly, it's necessary to have the Digital Terrain Models files in the Signal-Server_mod/data/dtm directory.
 
 ---
 
@@ -12,7 +12,8 @@ Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagati
 |----------------------------------------|----------------------------------------|
 |            **Tile loading**  		 | Directory scan via `-lid <dir>`: automatically finds all `.asc`/`.tif`/`.tiff` files in the folder without listing each one individually.|
 |           **Spatial filter** 		 | Before loading pixel data, each tile's bounding box is checked against the TX location + radius. Only tiles that overlap the area of interest are loaded, drastically reducing load time when the directory contains hundreds of tiles (e.g. all-Navarra MDT). |
-| 	     **Reprojection**  		 | Tiles in any CRS (e.g. EPSG:25830 UTM) are automatically reprojected to WGS84 via GDAL. A `.prj` sidecar file is used when present. |
+|         **Seamless terrain** 		 | The ROI tiles are warped to a single WGS84 mosaic in one pass with GDALWarp, instead of reprojecting each tile independently. This removes the straight seams (misaligned grids and 0 m edge wedges) at tile boundaries. Because GDALWarp accepts sources with **different CRS**, a region spanning several UTM zones (e.g. Spanish husos 30 and 31) is fused seamlessly. The temporary mosaic lives in memory and is discarded after the run. |
+| 	     **Reprojection**  		 | Tiles in any CRS (e.g. any UTM zone) are automatically reprojected to WGS84 via GDAL using the CRS embedded in the GeoTIFF (or a `.prj` sidecar for `.asc`). An `.asc` with no readable CRS is assumed to be WGS84 lat/lon, and the binary now prints a warning in that case. |
 | 	**Bilinear interpolation**	 | `GetElevation()` uses bilinear interpolation between the four nearest DEM pixels instead of nearest-neighbour, reducing staircase artefacts at high resolution. |
 | **yppd (longitude pixels-per-degree)** | Computed from the actual tile width in degrees rather than assumed square, correcting coordinate distortion after UTM→WGS84 reprojection. |
 | 	   **Report buffer**		 | `PathReport()`: `report_name` buffer increased from 80 to 512 bytes, fixing truncation of long output paths. |
@@ -22,12 +23,46 @@ Fork of [Signal Server](https://github.com/Alex-QCVS/Signal-Server) RF propagati
 
 ---
 
+## Terrain data downloader (`scripts/download_dtm_ign_spain.py`)
+
+Downloads Digital Terrain Models (MDT) for peninsular Spain from the IGN WCS as a single standardized product: **MDT 5 m, EPSG:25830, GeoTIFF**. By default the tiles are saved into `data/dtm` (the folder the simulator reads).
+
+```bash
+pip install -r requirements.txt
+
+# list the available regions
+python scripts/download_dtm_ign_spain.py --regions
+
+# download one region (saved to data/dtm)
+python scripts/download_dtm_ign_spain.py castilla_la_mancha
+
+# save to a custom terrain-models folder instead
+python scripts/download_dtm_ign_spain.py castilla_la_mancha -i /path/to/models
+```
+
+### Input flags
+
+|        Flag          | Value  |                                  Description                                  |
+|----------------------|--------|-------------------------------------------------------------------------------|
+| `region`             | name   | Region to download, lowercase with `_` (e.g. `castilla_la_mancha`, `espana_peninsular`). Run `--regions` for the full list. |
+| `-i`, `--input-path` | path   | Folder with terrain models — the download destination and the folder the simulator reads. **If omitted, defaults to `data/dtm`.** |
+| `-t`, `--tile`       | metres | Tile side length in metres (default: 10000). |
+| `-w`, `--workers`    | int    | Number of parallel download threads (default: 6). |
+| `-f`, `--filter`     | string | Only download tiles whose filename contains this substring. |
+| `--limit`            | int    | Download at most N tiles (useful for testing). |
+| `--list`             | —      | Dry-run: list/count the tiles and print the request URLs without downloading. |
+| `--regions`          | —      | Print the list of available regions and exit. |
+
+> Note: 5 m is the maximum resolution available over the WCS/API without a login. The 2 m product (MDT02) is only served by the CNIG download centre and requires a registered account.
+
+---
+
 ## Wrapper script (`runsig_lidar.sh`)
 The script wraps the binary with automatic KMZ generation, gnuplot profile chart, and JSON output.
 
 # Usage
-	-->   ./runsig_lidar.sh [options] -o OUTPUT_PATH
-`OUTPUT_PATH` is a base path without extension (e.g. `/results/Link_A/Link_A`).  
+	-->   ./scripts/runsig_lidar.sh [options] -o OUTPUT_PATH
+`OUTPUT_PATH` is a base path without extension (e.g. `/results/Link_A/Link_A`).
 The script creates a subdirectory `<basename>/` and writes all output files there.
 
 
@@ -125,22 +160,22 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
 ### Examples
 **Point-to-point only:**
 ```bash
-./runsig_lidar.sh \ 
-  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi -rxg 6.86 \
+./scripts/runsig_lidar.sh \
+  -ant /path/to/Signal-Server_mod/data/antennas/Monopole/Monopole_9dBi -rxg 6.86 \
   -lat 64.31920992106285 -lon -15.239195936909075 \
   -rla 64.28813853450863 -rlo -15.146888767722631 \
   -txh 2.75 -rxh 1.5 -txn "Site A" -rxn "Site B" \
   -f 2450 -erp 61 -R 15 \
   -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
   -dbm -m -resample 2 \
-  -o C:/Users/Adminlocal/Desktop/results/Link_AB
+  -o /path/to/results/Link_AB
 ```
 
 
 **P2P + coverage overlay:**
 ```bash
-./runsig_lidar.sh \ 
-  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi -rxg 6.86 \
+./scripts/runsig_lidar.sh \
+  -ant /path/to/Signal-Server_mod/data/antennas/Monopole/Monopole_9dBi -rxg 6.86 \
   -lat 64.31920992106285 -lon -15.239195936909075 \
   -rla 64.28813853450863 -rlo -15.146888767722631 \
   -txh 2.75 -rxh 1.5 -txn "Site A" -rxn "Site B" \
@@ -148,19 +183,68 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
   -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
   -dbm -m -resample 2 \
   -coverage -covresample 2 \
-  -o C:/Users/Adminlocal/Desktop/results/Link_AB_coverage
+  -o /path/to/results/Link_AB_coverage
 ```
 
 **Area coverage only:**
 ```bash
-./runsig_lidar.sh \ 
-  -ant C:/Users/Adminlocal/Desktop/Signal-Server_mod/utils/antenna/Monopole/Monopole_9dBi \
+./scripts/runsig_lidar.sh \
+  -ant /path/to/Signal-Server_mod/data/antennas/Monopole/Monopole_9dBi \
   -lat 64.31920992106285 -lon -15.239195936909075 \
   -txh 1.75 -txn "Base Station" \
   -f 2450 -erp 61 -R 15 \
   -pm 1 -pe 2 -rel 80 -conf 90 -cl 5 -te 4 \
   -dbm -m -resample 2 \
-  -o C:/Users/Adminlocal/Desktop/results/Coverage_BS
+  -o /path/to/results/Coverage_BS
+```
+
+---
+
+## Batch launcher (`launch_simulations.sh`)
+
+Runs many `runsig_lidar.sh` simulations from a single plain-text data file:
+
+- **COVERAGE**: one per HOME × each Tx height.
+- **P2P**: one per HOME × each receiver point × each Tx height × each Rx height.
+
+```bash
+./scripts/launch_simulations.sh examples/example_input.txt
+```
+
+### Data file format
+
+```
+tx_height: 1.75, 15, 30                 # transmitter heights (list)
+rx_height: 5, 10                        # P2P receiver heights (list)
+
+Site_Reykjavik.bin                      # a location (the .bin suffix is stripped)
+HOME:    64.146600, -21.942600, -R 5    # HOME: lat, lon, extra-args (verbatim)
+Relay_1: 64.161000, -21.910000, -R 4    # receiver point: name, lat, lon, extra
+Relay_2: 64.130000, -21.880000, -R 4
+```
+
+- Each `Name: lat, lon, <extra>` line is a point; everything after the 2nd comma (`<extra>`, e.g. `-R 5`) is appended verbatim to that command (COVERAGE uses HOME's extra, P2P uses the receiver's).
+- Point names must be unique within a location (duplicates get `_2`, `_3`, ...).
+- A line without `:` starts a new location.
+
+See `examples/example_input.txt` for a complete example.
+
+### Options (environment variables)
+
+|       Variable          |                              Description                                |
+|-------------------------|-------------------------------------------------------------------------|
+| `JOBS=N`                | Run up to **N simulations in parallel** (default: 1). |
+| `DRY_RUN=1`             | Print the commands without running anything. |
+| `SKIP_EXISTING=1`       | Skip a simulation if its output already exists. |
+| `STOP_ON_ERROR=1`       | Abort the batch on the first failure (serial mode only). |
+| `ONLY=coverage` / `p2p` | Run only one type of simulation. |
+| `OUTBASE=<dir>`         | Output base folder for all results. **Default: the repository's `results/` folder.** |
+
+**Parallelism note:** each simulation is already multi-threaded, so the total load is roughly `JOBS × threads-per-sim`. Choose `JOBS` near `CPU_cores / threads-per-sim` and watch RAM (each job loads terrain tiles into memory). To use every core cleanly with low memory pressure, set `JOBS=$(nproc)` and add `-nothreads` to `COMMON_PARAMS` (one thread per job). In parallel mode each job's output goes to a per-job log file (its path is printed if the job fails).
+
+```bash
+# example: 4 simulations at a time
+JOBS=4 ./scripts/launch_simulations.sh examples/example_input.txt
 ```
 
 ---
@@ -168,5 +252,5 @@ All files are written to `<OUTPUT_DIR>/<BASENAME>/`:
 ### Dependencies
 
 ```bash
-sudo sh Install_depencies.sh
+sudo bash install_dependencies.sh
 ```

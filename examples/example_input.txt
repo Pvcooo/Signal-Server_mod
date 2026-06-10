@@ -1,0 +1,14 @@
+tx_height: 1.75, 15, 30
+rx_height: 5, 10
+
+Site_Reykjavik.bin
+HOME:    64.146600, -21.942600, -R 5
+Relay_1: 64.161000, -21.910000, -R 4
+Relay_2: 64.130000, -21.880000, -R 4
+
+Site_Akureyri.bin
+HOME:    65.688500, -18.126200, -R 5
+Relay_1: 65.700000, -18.100000, -R 4
+
+Site_Selfoss.bin
+HOME:    63.933700, -20.997300, -R 6

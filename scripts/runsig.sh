@@ -12,7 +12,7 @@ for name; do true; done
 
 # This script should contain options common to every run on the target system.
 
-#time ./signalserverHD -sdf /mnt/data -pm 1 -rxh 6 -te 3 -cl 5 -pe 2 -dbg $@ 2>&1
-time ./signalserver -sdf /mnt/data -pm 1 -rxh 6 -te 3 -cl 5 -pe 2 -dbg $@ 2>&1
+#time "$(dirname "$0")/../src/signalserverHD" -sdf /mnt/data -pm 1 -rxh 6 -te 3 -cl 5 -pe 2 -dbg $@ 2>&1
+time "$(dirname "$0")/../src/signalserver" -sdf /mnt/data -pm 1 -rxh 6 -te 3 -cl 5 -pe 2 -dbg $@ 2>&1
 # to resize, add: -resize 7000x7000\>
 convert $name.ppm -transparent white $name.png

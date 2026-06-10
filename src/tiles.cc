@@ -12,7 +12,6 @@
 
 #define MAX_LINE 50000
 
-/* Computes the distance between two long/lat points */
 double haversine_formula(double th1, double ph1, double th2, double ph2)
 {
 	#define TO_RAD (3.1415926536 / 180)
@@ -32,15 +31,11 @@ int tile_load_lidar(tile_t *tile, char *filename){
 	short nextval;
 	char *pch;
 
-	/* Clear the tile data */
 	memset(tile, 0x00, sizeof(tile_t));
 
-	/* Open the file handle and return on error */
 	if ( (fd = fopen(filename,"r")) == NULL )
 		return errno;
 
-	/* This is where we read the header data */
-	/* The string is split for readability but is parsed as a block */
 	if( fscanf(fd,"%*s %d\n" "%*s %d\n" "%*s %lf\n" "%*s %lf\n" "%*s %lf\n" "%*s %d\n",&tile->width,&tile->height,&tile->xll,&tile->yll,&tile->cellsize,(int *)&tile->nodata) != 6 ){
 		fclose(fd);
 		return -1;
@@ -53,10 +48,8 @@ int tile_load_lidar(tile_t *tile, char *filename){
 		fflush(stderr);
 	}
 
-	/* Set the filename */
 	tile->filename = strdup(filename);
 
-	/* Perform xur calcs */
 	tile->xur = tile->xll+(tile->cellsize*tile->width);
 	tile->yur = tile->yll+(tile->cellsize*tile->height);
 
@@ -68,13 +61,6 @@ int tile_load_lidar(tile_t *tile, char *filename){
 	 if (debug)
 	 	fprintf(stderr,"%d, %d, %.7f, %.7f, %.7f, %.7f, %.7f\n",tile->width,tile->height,tile->xll,tile->yll,tile->cellsize,tile->yur,tile->xur);
 
-	// Greenwich straddling hack
-	/* if (tile->xll <= 0 && tile->xur > 0) {
-	 	tile->xll = (tile->xur - tile->xll); // full width
-	 	tile->xur = 0.0; // budge it along so it's west of greenwich
-	 	delta = eastoffset; // add to Tx longitude later
-	 } else {*/
-		// Transform WGS84 longitudes into 'west' values as society finishes east of Greenwich ;)
 		if (tile->xll >= 0)
 			tile->xll = 360-tile->xll;
 		if(tile->xur >= 0)
@@ -83,13 +69,10 @@ int tile_load_lidar(tile_t *tile, char *filename){
 			tile->xll = tile->xll * -1;
 		if(tile->xur < 0)
 			tile->xur = tile->xur * -1;
-	// }
 
 	if (debug)
 		fprintf(stderr, "POST yll %.7f yur %.7f xur %.7f xll %.7f delta %.6f\n", tile->yll, tile->yur, tile->xur, tile->xll, delta);
 
-	/* Read the actual tile data */
-	/* Allocate the array for the lidar data */
 	if ( (tile->data = (short*) calloc(tile->width * tile->height, sizeof(short))) == NULL ) {
 		fclose(fd);
 		free(tile->filename);
@@ -99,9 +82,9 @@ int tile_load_lidar(tile_t *tile, char *filename){
 	size_t loaded = 0;
 	for (size_t h = 0; h < (unsigned)tile->height; h++) {
 		if (fgets(line, MAX_LINE, fd) != NULL) {
-			pch = strtok(line, " "); // split line into values
+			pch = strtok(line, " ");
 			for (size_t w = 0; w < (unsigned)tile->width && pch != NULL; w++) {
-				/* If the data is less than a *magic* minimum, normalize it to zero */
+
 				nextval = atoi(pch);
 				if (nextval <= 0)
 					nextval = 0;
@@ -112,19 +95,17 @@ int tile_load_lidar(tile_t *tile, char *filename){
 				if ( nextval < tile->min_el )
 					tile->min_el = nextval;
 				pch = strtok(NULL, " ");
-			}//while
+			}
 		} else {
 			fprintf(stderr, "LIDAR error @ h %zu file %s\n", h, filename);
-		}//if
+		}
 	}
 
 	double current_res_km = haversine_formula(tile->max_north, tile->max_west, tile->max_north, tile->min_west);
 	tile->precise_resolution = (current_res_km/MAX(tile->width,tile->height)*1000);
 
-	// Round to nearest 0.5
 	tile->resolution = tile->precise_resolution < 0.5f ? 0.5f : ceil((tile->precise_resolution * 2)+0.5) / 2;
 
-	// Positive westing
 	tile->width_deg = tile->max_west - tile->min_west >= 0 ? tile->max_west - tile->min_west : tile->max_west + (360 - tile->min_west);
 	tile->height_deg = tile->max_north - tile->min_north;
 
@@ -134,12 +115,10 @@ int tile_load_lidar(tile_t *tile, char *filename){
 	if (debug)
 		fprintf(stderr,"Pixels loaded: %zu/%d (PPD %dx%d, Res %f (%.2f))\n", loaded, tile->width*tile->height, tile->ppdx, tile->ppdy, tile->precise_resolution, tile->resolution);
 
-	/* All done, close the LIDAR file */
 	fclose(fd);
 
 	return 0;
 }
-
 
 int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
     memset(tile, 0x00, sizeof(tile_t));
@@ -149,7 +128,6 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
     GDALDataset *ds_orig = (GDALDataset*) GDALOpen(filename, GA_ReadOnly);
     if (!ds_orig) return -1;
 
-    /* Inspect CRS */
     const char *proj = ds_orig->GetProjectionRef();
     if (!proj || strlen(proj) == 0) {
         if (debug) {
@@ -171,7 +149,6 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
         return -1;
     }
 
-    /* Determine if reprojection to WGS84 is needed */
     bool is_wgs84 = srs_src.IsGeographic() &&
                     srs_src.GetAuthorityName(NULL) &&
                     srs_src.GetAuthorityCode(NULL) &&
@@ -200,11 +177,11 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
 
         GDALDatasetH ds_warped_h = GDALAutoCreateWarpedVRT(
             (GDALDatasetH)ds_orig,
-            NULL,          /* source WKT: auto-detect from source dataset */
-            wgs84_wkt,     /* target WKT: WGS84 geographic */
-            GRA_Bilinear,  /* resampling: bilinear for elevation smoothness */
-            0.125,         /* max error in pixels */
-            NULL           /* no extra warp options */
+            NULL,
+            wgs84_wkt,
+            GRA_Bilinear,
+            0.125,
+            NULL
         );
         CPLFree(wgs84_wkt);
 
@@ -235,7 +212,6 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
         return -1;
     }
 
-    /* After warping to WGS84 the output is always north-up, but check anyway */
     if (fabs(gt[2]) > 1e-9 || fabs(gt[4]) > 1e-9) {
         if (debug) {
             fprintf(stderr, "GDAL file %s: rotated/skewed raster not supported\n", filename);
@@ -246,13 +222,11 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
         return -1;
     }
 
-    double xll   = gt[0];   /* left longitude */
-    double yur   = gt[3];   /* upper latitude */
-    double cellx = gt[1];   /* degrees/pixel in X (positive) */
-    double celly = gt[5];   /* degrees/pixel in Y (negative) */
+    double xll   = gt[0];
+    double yur   = gt[3];
+    double cellx = gt[1];
+    double celly = gt[5];
 
-    /* Allow up to 2% non-squareness: GDALAutoCreateWarpedVRT normally produces
-       square pixels, but floating-point rounding can introduce tiny differences */
     double pix_abs_x = fabs(cellx);
     double pix_abs_y = fabs(celly);
     double pix_avg   = (pix_abs_x + pix_abs_y) * 0.5;
@@ -271,22 +245,19 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
     double yll = yur + celly * height;
     double xur = xll + cellx * width;
 
-    /* Output pixel count — GDAL's RasterIO can downsample on the fly, which is
-     * much faster than reading at full resolution and rescaling afterward. */
     int rf = (resample_factor > 1) ? resample_factor : 1;
     int out_w = MAX(1, width  / rf);
     int out_h = MAX(1, height / rf);
 
     tile->width    = out_w;
     tile->height   = out_h;
-    tile->cellsize = pix_avg * rf;  /* cell size at the output resolution */
+    tile->cellsize = pix_avg * rf;
     tile->xll = xll;
     tile->yll = yll;
     tile->xur = xur;
     tile->yur = yur;
     tile->filename = strdup(filename);
 
-    /* Convert to positive-westing convention used internally */
     if (tile->xll >= 0) tile->xll = 360 - tile->xll;
     if (tile->xur >= 0) tile->xur = 360 - tile->xur;
     if (tile->xll < 0)  tile->xll = -tile->xll;
@@ -315,8 +286,6 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
         return ENOMEM;
     }
 
-    /* Read directly at out_w×out_h: GDAL performs the downsampling internally.
-     * Source window = full raster; dest buffer = out_w×out_h → GDAL averages. */
     float *tmp = (float*) CPLMalloc(sizeof(float) * (size_t)out_w * (size_t)out_h);
     if (!tmp) {
         if (warped) GDALClose(ds);
@@ -342,7 +311,7 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
 
     for (size_t i = 0; i < (size_t)out_w * (size_t)out_h; i++) {
         float v = tmp[i];
-        /* nodata → sea level; tolerance of 0.5 covers integer nodata like -9999 */
+
         if (hasNoData && fabs((double)v - nd) < 0.5) v = 0.0f;
         if (v < 0) v = 0.0f;
         short sv = (short)lrintf(v);
@@ -378,29 +347,18 @@ int tile_load_geotiff(tile_t *tile, char *filename, int resample_factor) {
     return 0;
 }
 
-
-/*
- * tile_rescale
- * This is used to resample tile data. It is particularly designed for
- * use with LIDAR tiles where the resolution can be anything up to 2m.
- * This function is capable of merging neighbouring pixel values
- * The scaling factor is the distance to merge pixels.
- * NOTE: This means that new resolutions can only increment in multiples of the original
- * (ie 2m LIDAR can be 4/6/8/... and 20m can be 40/60)
- */
 int tile_rescale(tile_t *tile, float scale){
 	short *new_data;
 	size_t skip_count = 1;
 	size_t copy_count = 1;
 
 	if (scale == 1) {
-		return 0;	
+		return 0;
 	}
 
 	size_t new_height = tile->height * scale;
 	size_t new_width = tile->width * scale;
 
-	/* Allocate the array for the lidar data */
 	if ( (new_data = (short*) calloc(new_height * new_width, sizeof(short))) == NULL ) {
 		return ENOMEM;
 	}
@@ -408,7 +366,6 @@ int tile_rescale(tile_t *tile, float scale){
 	tile->max_el = -32768;
 	tile->min_el = 32768;
 
-	/* Making the tile data smaller */
 	if (scale < 1) {
 		skip_count = 1 / scale;
 	} else {
@@ -419,25 +376,20 @@ int tile_rescale(tile_t *tile, float scale){
 		fprintf(stderr,"Resampling tile %s [%.1f]:\n\tOld %dx%d. New %zux%zu\n\tScale %f Skip %zu Copy %zu\n", tile->filename, tile->resolution, tile->width, tile->height, new_width, new_height, scale, skip_count, copy_count);
 		fflush(stderr);
 	}
-	/* Nearest neighbour normalization. For each subsample of the original, simply
-	 * assign the value in the top left to the new pixel 
-	 * SOURCE: X / Y
-	 * DEST:   I / J */
 
 	for (size_t y = 0, j = 0; y < (unsigned)tile->height && j < new_height; y += skip_count, j += copy_count) {
 
 		for (size_t x = 0, i = 0; x < (unsigned)tile->width && i < new_width; x += skip_count, i += copy_count) {
-		
-			/* These are for scaling up the data */
+
 			for (size_t copy_y = 0; copy_y < copy_count; copy_y++) {
 				for (size_t copy_x = 0; copy_x < copy_count; copy_x++) {
 					size_t new_j = j + copy_y;
 					size_t new_i = i + copy_x;
-					/* Do the copy */
+
 					new_data[ new_j * new_width + new_i ] = tile->data[y * tile->width + x];
 				}
 			}
-			/* Update local min / max values */
+
 			if (tile->data[y * tile->width + x] > tile->max_el)
 				tile->max_el = tile->data[y * tile->width + x];
 			if (tile->data[y * tile->width + x] < tile->min_el)
@@ -445,30 +397,21 @@ int tile_rescale(tile_t *tile, float scale){
 		}
 	}
 
-	/* Update the date in the tile */
 	free(tile->data);
 	tile->data = new_data;
 
-	/* Update the height and width values */
 	tile->height = new_height;
 	tile->width = new_width;
-	tile->resolution *= 1/scale;	// A scale of 2 is HALF the resolution
+	tile->resolution *= 1/scale;
 	tile->ppdx = tile->width / tile->width_deg;
 	tile->ppdy = tile->height / tile->height_deg;
-	// tile->width_deg *= scale;
-	// tile->height_deg *= scale;
+
 	if (debug)
 		fprintf(stderr, "Resampling complete. New resolution: %.1f\n", tile->resolution);
 
 	return 0;
 }
 
-/*
- * tile_resize
- * This function works in conjuntion with resample_data. It takes a
- * resolution value in meters as its argument. It then calculates the
- * nearest (via averaging) resample value and calls resample_data
- */
 int tile_resize(tile_t* tile, int resolution){
 	double current_res_km = haversine_formula(tile->max_north, tile->max_west, tile->max_north, tile->min_west);
 	int current_res = (int) ceil((current_res_km/IPPD)*1000);
@@ -478,10 +421,6 @@ int tile_resize(tile_t* tile, int resolution){
 	return tile_rescale(tile, scaling_factor);
 }
 
-/*
- * tile_destroy
- * This function simply destroys any data associated with a tile
- */
 void tile_destroy(tile_t* tile){
 	if (tile->data != NULL)
 		free(tile->data);

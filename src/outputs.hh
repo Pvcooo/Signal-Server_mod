@@ -14,4 +14,4 @@ void PathReport(struct site source, struct site destination, char *name,
 void SeriesData(struct site source, struct site destination, char *name,
 		unsigned char fresnel_plot, unsigned char normalised);
 
-#endif /* _OUTPUT_HH_ */
+#endif

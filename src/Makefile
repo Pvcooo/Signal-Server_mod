@@ -61,20 +61,11 @@ los.o: los.cc los.hh main.hh cost.hh ecc33.hh ericsson.hh fspl.hh hata.hh \
 tiles.o: tiles.cc tiles.hh common.h
 
 
-testmodels.o: testmodels.cc cost.hh ecc33.hh ericsson.hh fspl.hh hata.hh \
-	egli.hh sui.hh itwom3.0.hh
-
-testmodels: testmodels.o cost.o ecc33.o ericsson.o fspl.o hata.o egli.o sui.o itwom3.0.o
-	@echo -e "    LNK\t$@"
-	@$(CXX) testmodels.o cost.o ecc33.o ericsson.o fspl.o hata.o egli.o \
-	sui.o itwom3.0.o -o $@ ${LIBS}
-
 .PHONY: clean
 clean:
-	rm -f $(objects) signalserver signalserverHD signalserverLIDAR testmodels
+	rm -f $(objects) signalserver signalserverHD signalserverLIDAR
 
 all: signalserver
 
 install: all
 	cp -a signalserver signalserverHD signalserverLIDAR $(INSTALL_PATH)
-

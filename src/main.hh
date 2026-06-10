@@ -30,4 +30,4 @@ void alloc_path(void);
 void alloc_dem(void);
 void do_allocs(void);
 
-#endif /* _MAIN_HH_ */
+#endif

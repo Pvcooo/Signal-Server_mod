@@ -3,4 +3,4 @@
 
 double EricssonpathLoss(float f, float TxH, float RxH, float d, int mode);
 
-#endif /* _ERICSSON_HH_ */
+#endif

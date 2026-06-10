@@ -21,11 +21,6 @@
 void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 		unsigned char ngs, struct site *xmtr, unsigned char txsites)
 {
-	/* This function generates a topographic map in Portable Pix Map
-	   (PPM) format based on the content of flags held in the mask[][]
-	   array (only).  The image created is rotated counter-clockwise
-	   90 degrees from its representation in dem[][] so that north
-	   points up and east points right in the image generated. */
 
 	char mapfile[255];
 	unsigned red, green, blue, terrain = 0;
@@ -48,14 +43,14 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 
 	if( (success = LoadLossColors(xmtr[0])) != 0 ){
 		fprintf(stderr,"Error loading loss colors\n");
-		exit(success);  // Now a fatal error!
+		exit(success);
 	}
 
 	if( filename != NULL ) {
 
 		if (filename[0] == 0) {
 			strncpy(filename, xmtr[0].filename, 254);
-			filename[strlen(filename) - 4] = 0;	/* Remove .qth */
+			filename[strlen(filename) - 4] = 0;
 		}
 
 		if(image_get_filename(&ctx,mapfile,sizeof(mapfile),filename) != 0){
@@ -80,9 +75,9 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 	north = (double)max_north - dpp;
 
 	if (kml || geo)
-		south = (double)min_north;	/* No bottom legend */
+		south = (double)min_north;
 	else
-		south = (double)min_north - (30.0 / ppd);	/* 30 pixels for bottom legend */
+		south = (double)min_north - (30.0 / ppd);
 
 	east = (minwest < 180.0 ? -minwest : 360.0 - min_west);
 	west = (double)(max_west < 180 ? -max_west : 360 - max_west);
@@ -110,13 +105,6 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 					      (LonDiff
 					       ((double)dem[indx].max_west,
 						lon)));
-				 // fix for multi-tile lidar
-                              /*  if(width==10000 && (indx==1 || indx==3)){
-                                        if(y0 >= 3432){ //3535
-                                                y0=y0-3432;
-                                        }
-                                }*/
-
 
 				if (x0 >= 0 && x0 <= mpi && y0 >= 0
 				    && y0 <= mpi)
@@ -155,7 +143,6 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				if (mask & 2) {
-					/* Text Labels: Red or otherwise */
 
 					if (red >= 180 && green <= 75
 					    && blue <= 75 && loss == 0)
@@ -170,7 +157,6 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				else if (mask & 4) {
-					/* County Boundaries: Black */
 
 					ADD_PIXEL(&ctx, 0, 0, 0);
 
@@ -182,15 +168,14 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 					    || (contour_threshold != 0
 						&& loss >
 						abs(contour_threshold))) {
-						if (ngs)	/* No terrain */
-							ADD_PIXEL(&ctx, 
+						if (ngs)
+							ADD_PIXEL(&ctx,
 								255, 255, 255);
 						else {
-							/* Display land or sea elevation */
 
 							if (dem[indx].
 							    data[x0][y0] == 0)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									0, 0,
 									170);
 							else {
@@ -198,7 +183,7 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 								    (unsigned)
 								    (0.5 +
 								     pow((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									terrain,
 									terrain,
 									terrain);
@@ -207,28 +192,27 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 					}
 
 					else {
-						/* Plot path loss in color */
 
 						if (red != 0 || green != 0
 						    || blue != 0)
-							ADD_PIXEL(&ctx, 
+							ADD_PIXEL(&ctx,
 								red, green,
 								blue);
 
-						else {	/* terrain / sea-level */
+						else {
 
 							if (dem[indx].
 							    data[x0][y0] == 0)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									0, 0,
 									170);
 							else {
-								/* Elevation: Greyscale */
+
 								terrain =
 								    (unsigned)
 								    (0.5 +
 								     pow((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									terrain,
 									terrain,
 									terrain);
@@ -239,8 +223,6 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 			}
 
 			else {
-				/* We should never get here, but if */
-				/* we do, display the region as black */
 
 				ADD_PIXEL(&ctx, 0, 0, 0);
 			}
@@ -264,11 +246,6 @@ void DoPathLoss(char *filename, unsigned char geo, unsigned char kml,
 int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 	      unsigned char ngs, struct site *xmtr, unsigned char txsites)
 {
-	/* This function generates a topographic map in Portable Pix Map
-	   (PPM) format based on the signal strength values held in the
-	   signal[][] array.  The image created is rotated counter-clockwise
-	   90 degrees from its representation in dem[][] so that north
-	   points up and east points right in the image generated. */
 
 	char mapfile[255];
 	unsigned terrain, red, green, blue;
@@ -291,14 +268,14 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 
 	if( (success = LoadSignalColors(xmtr[0])) != 0 ){
 		fprintf(stderr,"Error loading signal colors\n");
-		//exit(success);
+
 	}
 
 	if( filename != NULL ) {
 
 		if (filename[0] == 0) {
 			strncpy(filename, xmtr[0].filename, 254);
-			filename[strlen(filename) - 4] = 0;	/* Remove .qth */
+			filename[strlen(filename) - 4] = 0;
 		}
 
 		if(image_get_filename(&ctx,mapfile,sizeof(mapfile),filename) != 0){
@@ -322,7 +299,7 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 
 	north = (double)max_north - dpp;
 
-	south = (double)min_north;	/* No bottom legend */
+	south = (double)min_north;
 
 	east = (minwest < 180.0 ? -minwest : 360.0 - min_west);
 	west = (double)(max_west < 180 ? -max_west : 360 - max_west);
@@ -350,14 +327,6 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 					      (LonDiff
 					       ((double)dem[indx].max_west,
 						lon)));
-
-				 // fix for multi-tile lidar
-                           /*     if(width==10000 && (indx==1 || indx==3)){
-                                        if(y0 >= 3432){ //3535
-                                                y0=y0-3432;
-                                        }
-                                }
-				*/
 
 				if (x0 >= 0 && x0 <= mpi && y0 >= 0
 				    && y0 <= mpi)
@@ -396,7 +365,6 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				if (mask & 2) {
-					/* Text Labels: Red or otherwise */
 
 					if (red >= 180 && green <= 75
 					    && blue <= 75)
@@ -411,7 +379,6 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				else if (mask & 4) {
-					/* County Boundaries: Black */
 
 					ADD_PIXEL(&ctx, 0, 0, 0);
 
@@ -422,14 +389,13 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 					if (contour_threshold != 0
 					    && signal < contour_threshold) {
 						if (ngs)
-							ADD_PIXEL(&ctx, 
+							ADD_PIXEL(&ctx,
 								255, 255, 255);
 						else {
-							/* Display land or sea elevation */
 
 							if (dem[indx].
 							    data[x0][y0] == 0)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									0, 0,
 									170);
 							else {
@@ -437,7 +403,7 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 								    (unsigned)
 								    (0.5 +
 								     pow((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									terrain,
 									terrain,
 									terrain);
@@ -446,18 +412,17 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 					}
 
 					else {
-						/* Plot field strength regions in color */
 
 						if (red != 0 || green != 0
 						    || blue != 0)
-							ADD_PIXEL(&ctx, 
+							ADD_PIXEL(&ctx,
 								red, green,
 								blue);
 
-						else {	/* terrain / sea-level */
+						else {
 
 							if (ngs)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									255,
 									255,
 									255);
@@ -465,12 +430,12 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 								if (dem[indx].
 								    data[x0][y0]
 								    == 0)
-									ADD_PIXEL(&ctx, 
+									ADD_PIXEL(&ctx,
 									     0,
 									     0,
 									     170);
 								else {
-									/* Elevation: Greyscale */
+
 									terrain
 									    =
 									    (unsigned)
@@ -478,7 +443,7 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 									     +
 									     pow
 									     ((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-									ADD_PIXEL(&ctx, 
+									ADD_PIXEL(&ctx,
 									     terrain,
 									     terrain,
 									     terrain);
@@ -490,8 +455,6 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 			}
 
 			else {
-				/* We should never get here, but if */
-				/* we do, display the region as black */
 
 				ADD_PIXEL(&ctx, 255, 255, 255);
 			}
@@ -515,11 +478,6 @@ int DoSigStr(char *filename, unsigned char geo, unsigned char kml,
 void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 	      unsigned char ngs, struct site *xmtr, unsigned char txsites)
 {
-	/* This function generates a topographic map in Portable Pix Map
-	   (PPM) format based on the signal power level values held in the
-	   signal[][] array.  The image created is rotated counter-clockwise
-	   90 degrees from its representation in dem[][] so that north
-	   points up and east points right in the image generated. */
 
 	char mapfile[255];
 	unsigned terrain, red, green, blue;
@@ -542,14 +500,14 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 
 	if( (success = LoadDBMColors(xmtr[0])) != 0 ){
 		fprintf(stderr,"Error loading DBM colors\n");
-		exit(success);  //Now a fatal error!
+		exit(success);
 	}
 
 	if( filename != NULL ) {
 
 		if (filename[0] == 0) {
 			strncpy(filename, xmtr[0].filename, 254);
-			filename[strlen(filename) - 4] = 0;	/* Remove .qth */
+			filename[strlen(filename) - 4] = 0;
 		}
 
 		if(image_get_filename(&ctx,mapfile,sizeof(mapfile),filename) != 0){
@@ -573,7 +531,7 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 
 	north = (double)max_north - dpp;
 
-	south = (double)min_north;	/* No bottom legend */
+	south = (double)min_north;
 
 	east = (minwest < 180.0 ? -minwest : 360.0 - min_west);
 	west = (double)(max_west < 180 ? -max_west : 360 - max_west);
@@ -584,7 +542,6 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 		fflush(stderr);
 	}
 
-	// Draw image of x by y pixels
 	for (y = 0, lat = north; y < (int)height;
 	     y++, lat = north - (dpp * (double)y)) {
 		for (x = 0, lon = max_west; x < (int)width;
@@ -603,13 +560,11 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 					      (LonDiff
 					       ((double)dem[indx].max_west,lon)));
 
-
 				if (x0 >= 0 && x0 <= mpi && y0 >= 0
 				    && y0 <= mpi)
 					found = 1;
 				else
 					indx++;
-
 
 			}
 
@@ -642,7 +597,6 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				if (mask & 2) {
-					/* Text Labels: Red or otherwise */
 
 					if (red >= 180 && green <= 75
 					    && blue <= 75 && dBm != 0)
@@ -657,7 +611,7 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 				}
 
 				else if (mask & 4) {
-					/* County Boundaries: Black */
+
 					ADD_PIXEL(&ctx, 0, 0, 0);
 					cityorcounty = 1;
 				}
@@ -665,11 +619,10 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 				if (cityorcounty == 0) {
 					if (contour_threshold != 0
 					    && dBm < contour_threshold) {
-						if (ngs)	/* No terrain */
+						if (ngs)
 							ADD_PIXEL(&ctx,
 								255, 255, 255);
 						else {
-							/* Display land or sea elevation */
 
 							if (dem[indx].
 							    data[x0][y0] == 0)
@@ -690,7 +643,6 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 					}
 
 					else {
-						/* Plot signal power level regions in color */
 
 						if (red != 0 || green != 0
 						    || blue != 0)
@@ -698,23 +650,23 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 								red, green,
 								blue);
 
-						else {	/* terrain / sea-level */
+						else {
 
 							if (ngs)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									255,
 									255,
-									255); // WHITE
+									255);
 							else {
 								if (dem[indx].
 								    data[x0][y0]
 								    == 0)
-									ADD_PIXEL(&ctx, 
+									ADD_PIXEL(&ctx,
 									     0,
 									     0,
-									     170); // BLUE
+									     170);
 								else {
-									/* Elevation: Greyscale */
+
 									terrain
 									    =
 									    (unsigned)
@@ -722,7 +674,7 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 									     +
 									     pow
 									     ((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-									ADD_PIXEL(&ctx, 
+									ADD_PIXEL(&ctx,
 									     terrain,
 									     terrain,
 									     terrain);
@@ -734,8 +686,6 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 			}
 
 			else {
-				/* We should never get here, but if */
-				/* we do, display the region as black */
 
 				ADD_PIXEL(&ctx, 255, 255, 255);
 			}
@@ -761,11 +711,6 @@ void DoRxdPwr(char *filename, unsigned char geo, unsigned char kml,
 void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 	   unsigned char ngs, struct site *xmtr, unsigned char txsites)
 {
-	/* This function generates a topographic map in Portable Pix Map
-	   (PPM) format based on the signal power level values held in the
-	   signal[][] array.  The image created is rotated counter-clockwise
-	   90 degrees from its representation in dem[][] so that north
-	   points up and east points right in the image generated. */
 
 	char mapfile[255];
 	unsigned terrain;
@@ -790,7 +735,7 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 
 		if (filename[0] == 0) {
 			strncpy(filename, xmtr[0].filename, 254);
-			filename[strlen(filename) - 4] = 0;	/* Remove .qth */
+			filename[strlen(filename) - 4] = 0;
 		}
 
 		if(image_get_filename(&ctx,mapfile,sizeof(mapfile),filename) != 0){
@@ -801,7 +746,7 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 		fd = fopen(mapfile,"wb");
 
 	} else {
-		
+
 		fprintf(stderr,"Writing to stdout\n");
 		fd = stdout;
 
@@ -814,7 +759,7 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 
 	north = (double)max_north - dpp;
 
-	south = (double)min_north;	/* No bottom legend */
+	south = (double)min_north;
 
 	east = (minwest < 180.0 ? -minwest : 360.0 - min_west);
 	west = (double)(max_west < 180 ? -max_west : 360 - max_west);
@@ -854,123 +799,123 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 				mask = dem[indx].mask[x0][y0];
 
 				if (mask & 2)
-					/* Text Labels: Red */
+
 					ADD_PIXEL(&ctx, 255, 0, 0);
 
 				else if (mask & 4)
-					/* County Boundaries: Light Cyan */
+
 					ADD_PIXEL(&ctx, 128, 128, 255);
 
 				else
 					switch (mask & 57) {
 					case 1:
-						/* TX1: Green */
+
 						ADD_PIXEL(&ctx, 0, 255,
 							0);
 						break;
 
 					case 8:
-						/* TX2: Cyan */
+
 						ADD_PIXEL(&ctx, 0, 255,
 							255);
 						break;
 
 					case 9:
-						/* TX1 + TX2: Yellow */
+
 						ADD_PIXEL(&ctx, 255, 255,
 							0);
 						break;
 
 					case 16:
-						/* TX3: Medium Violet */
+
 						ADD_PIXEL(&ctx, 147, 112,
 							219);
 						break;
 
 					case 17:
-						/* TX1 + TX3: Pink */
+
 						ADD_PIXEL(&ctx, 255, 192,
 							203);
 						break;
 
 					case 24:
-						/* TX2 + TX3: Orange */
+
 						ADD_PIXEL(&ctx, 255, 165,
 							0);
 						break;
 
 					case 25:
-						/* TX1 + TX2 + TX3: Dark Green */
+
 						ADD_PIXEL(&ctx, 0, 100,
 							0);
 						break;
 
 					case 32:
-						/* TX4: Sienna 1 */
+
 						ADD_PIXEL(&ctx, 255, 130,
 							71);
 						break;
 
 					case 33:
-						/* TX1 + TX4: Green Yellow */
+
 						ADD_PIXEL(&ctx, 173, 255,
 							47);
 						break;
 
 					case 40:
-						/* TX2 + TX4: Dark Sea Green 1 */
+
 						ADD_PIXEL(&ctx, 193, 255,
 							193);
 						break;
 
 					case 41:
-						/* TX1 + TX2 + TX4: Blanched Almond */
+
 						ADD_PIXEL(&ctx, 255, 235,
 							205);
 						break;
 
 					case 48:
-						/* TX3 + TX4: Dark Turquoise */
+
 						ADD_PIXEL(&ctx, 0, 206,
 							209);
 						break;
 
 					case 49:
-						/* TX1 + TX3 + TX4: Medium Spring Green */
+
 						ADD_PIXEL(&ctx, 0, 250,
 							154);
 						break;
 
 					case 56:
-						/* TX2 + TX3 + TX4: Tan */
+
 						ADD_PIXEL(&ctx, 210, 180,
 							140);
 						break;
 
 					case 57:
-						/* TX1 + TX2 + TX3 + TX4: Gold2 */
+
 						ADD_PIXEL(&ctx, 238, 201,
 							0);
 						break;
 
 					default:
-						if (ngs)	/* No terrain */
-							ADD_PIXEL(&ctx, 
+						if (ngs)
+							ADD_PIXEL(&ctx,
 								255, 255, 255);
 						else {
-							/* Sea-level: Medium Blue */
+
 							if (dem[indx].
 							    data[x0][y0] == 0)
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									0, 0,
 									170);
 							else {
-								/* Elevation: Greyscale */
+
 								terrain =
 								    (unsigned)
 								    (0.5 +
 								     pow((double)(dem[indx].data[x0][y0] - min_elevation), one_over_gamma) * conversion);
-								ADD_PIXEL(&ctx, 
+								ADD_PIXEL(&ctx,
 									terrain,
 									terrain,
 									terrain);
@@ -980,8 +925,6 @@ void DoLOS(char *filename, unsigned char geo, unsigned char kml,
 			}
 
 			else {
-				/* We should never get here, but if */
-				/* we do, display the region as black */
 
 				ADD_PIXEL(&ctx, 255, 255, 255);
 			}
@@ -1094,13 +1037,8 @@ void PathReport(struct site source, struct site destination, char *name,
 	fprintf(fd2, "Azimuth to %s: %.2f degrees grid\n", destination.name,
 		azimuth);
 
-
 	fprintf(fd2, "Downtilt angle to %s: %+.4f degrees\n",
 		destination.name, angle1);
-
-
-
-	/* Receiver */
 
 	fprintf(fd2, "\nReceiver site: %s\n", destination.name);
 
@@ -1154,7 +1092,6 @@ void PathReport(struct site source, struct site destination, char *name,
 	angle2 = ElevationAngle2(destination, source, earthradius);
 
 	fprintf(fd2, "Azimuth to %s: %.2f degrees grid\n", source.name, azimuth);
-
 
 	fprintf(fd2, "Downtilt angle to %s: %+.4f degrees\n",
 		source.name, angle1);
@@ -1281,8 +1218,6 @@ void PathReport(struct site source, struct site destination, char *name,
 			fprintf(fd2, " (%+.2f dBm)\n", dBm);
 			fprintf(fd2, "Transmitter ERP minus Receiver gain: %.2f dBm\n", dBm-rxGain);
 
-			/* EIRP = ERP + 2.14 dB */
-
 			fprintf(fd2, "Transmitter EIRP plus Receiver gain: ");
 
 			eirp = LR.erp * 1.636816521;
@@ -1302,7 +1237,6 @@ void PathReport(struct site source, struct site destination, char *name,
 			dBm = 10.0 * (log10(eirp * 1000.0));
 			fprintf(fd2, " (%+.2f dBm)\n", dBm);
 
-			// Rx gain
 			fprintf(fd2, "Transmitter EIRP minus Receiver gain: %.2f dBm\n", dBm-rxGain);
 		}
 
@@ -1314,10 +1248,7 @@ void PathReport(struct site source, struct site destination, char *name,
 				source.name, destination.name, pattern,
 				patterndB);
 
-		ReadPath(source, destination);	/* source=TX, destination=RX */
-
-		/* Copy elevations plus clutter along
-		   path into the elev[] array. */
+		ReadPath(source, destination);
 
 		for (x = 1; x < path.length - 1; x++)
 			elev[x + 2] =
@@ -1327,15 +1258,13 @@ void PathReport(struct site source, struct site destination, char *name,
 							       path.
 							       elevation[x]));
 
-		/* Copy ending points without clutter */
-
 		elev[2] = path.elevation[0] * METERS_PER_FOOT;
 		elev[path.length + 1] =
 		    path.elevation[path.length - 1] * METERS_PER_FOOT;
 
 		azimuth = rint(Azimuth(source, destination));
 
-		for (y = 2; y < (path.length - 1); y++) {	/* path.length-1 avoids LR error */
+		for (y = 2; y < (path.length - 1); y++) {
 			distance = FEET_PER_MILE * path.distance[y];
 
 			source_alt = four_thirds_earth + source.alt + path.elevation[0];
@@ -1344,17 +1273,11 @@ void PathReport(struct site source, struct site destination, char *name,
 			dest_alt2 = dest_alt * dest_alt;
 			source_alt2 = source_alt * source_alt;
 
-			/* Calculate the cosine of the elevation of
-			   the receiver as seen by the transmitter. */
-
 			cos_xmtr_angle =
 			    ((source_alt2) + (distance * distance) -
 			     (dest_alt2)) / (2.0 * source_alt * distance);
 
 			if (got_elevation_pattern) {
-				/* If an antenna elevation pattern is available, the
-				   following code determines the elevation angle to
-				   the first obstruction along the path. */
 
 				for (x = 2, block = 0; x < y && block == 0; x++) {
 					distance =
@@ -1364,10 +1287,6 @@ void PathReport(struct site source, struct site destination, char *name,
 					    four_thirds_earth +
 					    path.elevation[x];
 
-					/* Calculate the cosine of the elevation
-					   angle of the terrain (test point)
-					   as seen by the transmitter. */
-
 					cos_test_angle =
 					    ((source_alt2) +
 					     (distance * distance) -
@@ -1376,20 +1295,10 @@ void PathReport(struct site source, struct site destination, char *name,
 								       *
 								       distance);
 
-					/* Compare these two angles to determine if
-					   an obstruction exists.  Since we're comparing
-					   the cosines of these angles rather than
-					   the angles themselves, the sense of the
-					   following "if" statement is reversed from
-					   what it would be if the angles themselves
-					   were compared. */
-
 					if (cos_xmtr_angle >= cos_test_angle)
 						block = 1;
 				}
 
-				/* At this point, we have the elevation angle
-				   to the first obstruction (if it exists). */
 			}
 
 			/* Determine path loss for each point along the
@@ -1398,22 +1307,13 @@ void PathReport(struct site source, struct site destination, char *name,
 			   shortest distance terrain can play a role in
 			   path loss. */
 
-			elev[0] = y - 1;	/* (number of points - 1) */
-
-			/* Distance between elevation samples */
+			elev[0] = y - 1;
 
 			elev[1] =
 			    METERS_PER_MILE * (path.distance[y] -
 					       path.distance[y - 1]);
 
-			/*
-			   point_to_point(elev, source.alt*METERS_PER_FOOT,
-			   destination.alt*METERS_PER_FOOT, LR.eps_dielect,
-			   LR.sgm_conductivity, LR.eno_ns_surfref, LR.frq_mhz,
-			   LR.radio_climate, LR.pol, LR.conf, LR.rel, loss,
-			   strmode, errnum);
-			 */
-			dkm = (elev[1] * elev[0]) / 1000;	// km
+			dkm = (elev[1] * elev[0]) / 1000;
 
 			switch (propmodel) {
 			case 1:
@@ -1429,21 +1329,21 @@ void PathReport(struct site source, struct site destination, char *name,
 						   loss, strmode, errnum);
 				break;
 			case 3:
-				//HATA 1, 2 & 3
+
 				loss =
 				    HATApathLoss(LR.frq_mhz, source.alt * METERS_PER_FOOT,
 						 (path.elevation[y] * METERS_PER_FOOT) +
 						 (destination.alt * METERS_PER_FOOT), dkm, pmenv);
 				break;
 			case 4:
-				// COST231-HATA
+
 				loss =
 				    ECC33pathLoss(LR.frq_mhz, source.alt * METERS_PER_FOOT,
 						  (path.elevation[y] * METERS_PER_FOOT) +
 						  (destination.alt * METERS_PER_FOOT), dkm, pmenv);
 				break;
 			case 5:
-				// SUI
+
 				loss =
 				    SUIpathLoss(LR.frq_mhz, source.alt * METERS_PER_FOOT,
 						(path.elevation[y] * METERS_PER_FOOT) +
@@ -1456,7 +1356,7 @@ void PathReport(struct site source, struct site destination, char *name,
 						    (destination.alt * METERS_PER_FOOT), dkm,pmenv);
 				break;
 			case 7:
-				// ITU-R P.525 Free space path loss
+
 				loss = FSPLpathLoss(LR.frq_mhz, dkm);
 				break;
 			case 8:
@@ -1471,7 +1371,7 @@ void PathReport(struct site source, struct site destination, char *name,
 					       errnum);
 				break;
 			case 9:
-				// Ericsson
+
 				loss =
 				    EricssonpathLoss(LR.frq_mhz, source.alt * METERS_PER_FOOT,
 						     (path.elevation[y] * METERS_PER_FOOT) +
@@ -1499,9 +1399,6 @@ void PathReport(struct site source, struct site destination, char *name,
 			else
 				elevation =
 				    ((acos(cos_xmtr_angle)) / DEG2RAD) - 90.0;
-
-			/* Integrate the antenna's radiation
-			   pattern into the overall path loss. */
 
 			x = (int)rint(10.0 * (10.0 - elevation));
 
@@ -1540,7 +1437,6 @@ void PathReport(struct site source, struct site destination, char *name,
 
 		fprintf(fd2, "Computed path loss: %.2f dB\n", loss);
 
-
                 if((loss*1.5) < free_space_loss){
 			fprintf(fd2,"Model error! Computed loss of %.1fdB is greater than free space loss of %.1fdB. Check your inuts for model %d\n",loss,free_space_loss,propmodel);
                         fprintf(stderr,"Model error! Computed loss of %.1fdB is greater than free space loss of %.1fdB. Check your inuts for model %d\n",loss,free_space_loss,propmodel);
@@ -1561,15 +1457,13 @@ void PathReport(struct site source, struct site destination, char *name,
 			    (139.4 + (20.0 * log10(LR.frq_mhz)) - total_loss) +
 			    (10.0 * log10(LR.erp / 1000.0));
 
-			/* dBm is referenced to EIRP */
-
 			rxp = eirp / (pow(10.0, (total_loss / 10.0)));
 			dBm = 10.0 * (log10(rxp * 1000.0));
 			power_density =
 			    (eirp /
 			     (pow
 			      (10.0, (total_loss - free_space_loss) / 10.0)));
-			/* divide by 4*PI*distance_in_meters squared */
+
 			power_density /= (4.0 * PI * distance * distance *
 					  2589988.11);
 
@@ -1648,11 +1542,8 @@ void PathReport(struct site source, struct site destination, char *name,
 		"Path loss (dB), Received Power (dBm), Field strength (dBuV):\n%.1f\n%.1f\n%.1f",
 		loss, dBm, field_strength);
 
-	/* Skip plotting the graph if ONLY a path-loss report is needed. */
-
 	if (graph_it) {
 		if (name[0] == '.') {
-			/* Default filename and output file type */
 
 			strncpy(basename, "profile\0", 8);
 			strncpy(term, "png\0", 4);
@@ -1660,7 +1551,6 @@ void PathReport(struct site source, struct site destination, char *name,
 		}
 
 		else {
-			/* Extract extension and terminal type from "name" */
 
 			ext[0] = 0;
 			y = strlen(name);
@@ -1668,26 +1558,23 @@ void PathReport(struct site source, struct site destination, char *name,
 
 			for (x = y - 1; x > 0 && name[x] != '.'; x--) ;
 
-			if (x > 0) {	/* Extension found */
+			if (x > 0) {
 				for (z = x + 1; z <= y && (z - (x + 1)) < 10;
 				     z++) {
 					ext[z - (x + 1)] = tolower(name[z]);
 					term[z - (x + 1)] = name[z];
 				}
 
-				ext[z - (x + 1)] = 0;	/* Ensure an ending 0 */
+				ext[z - (x + 1)] = 0;
 				term[z - (x + 1)] = 0;
 				basename[x] = 0;
 			}
 		}
 
-		if (ext[0] == 0) {	/* No extension -- Default is png */
+		if (ext[0] == 0) {
 			strncpy(term, "png\0", 4);
 			strncpy(ext, "png\0", 4);
 		}
-
-		/* Either .ps or .postscript may be used
-		   as an extension for postscript output. */
 
 		if (strncmp(term, "postscript", 10) == 0)
 			strncpy(ext, "ps\0", 3);
@@ -1733,9 +1620,7 @@ void PathReport(struct site source, struct site destination, char *name,
 
 		if (x != -1) {
 			if (gpsav == 0) {
-				//unlink("ppa.gp");
-				//unlink("profile.gp");
-				//unlink("reference.gp");
+
 			}
 
 		}
@@ -1754,7 +1639,7 @@ void SeriesData(struct site source, struct site destination, char *name,
 	char basename[255], term[30], ext[15], profilename[255],
 	    referencename[255], cluttername[255], curvaturename[255],
 	    fresnelname[255], fresnel60name[255];
-	/* Absolute-coordinate files for terrain profile chart */
+
 	char terrainabsname[255], losabsname[255], f1absname[255], f60absname[255];
 	double a, b, c, height = 0.0, refangle, cangle, maxheight =
 	    -100000.0, minheight = 100000.0, lambda = 0.0, f_zone =
@@ -1772,10 +1657,6 @@ void SeriesData(struct site source, struct site destination, char *name,
 	refangle = ElevationAngle(destination, source);
 	b = GetElevation(destination) + destination.alt + earthradius;
 
-	/* Precompute TX and RX antenna heights AMSL (feet) for LOS linear interpolation.
-	   destination = TX (path[0]), source = RX (path[end]).
-	   GetElevation returns -5000.0 when a tile is not loaded (sentinel).
-	   If either endpoint is a sentinel, skip the LOS/Fresnel abs lines entirely. */
 	double tx_amsl_ft = GetElevation(destination) + destination.alt;
 	double rx_amsl_ft = GetElevation(source)      + source.alt;
 	double d_total_miles = (path.length > 1) ? path.distance[path.length - 1] : 1.0;
@@ -1789,7 +1670,7 @@ void SeriesData(struct site source, struct site destination, char *name,
 	        fprintf(stderr, "SeriesData: az = %lf, dist = %lf, ref = %lf, b = %lf\n", azimuth, distance, refangle, b);
 		fflush(stderr);
 	}
-	
+
 	if (fresnel_plot) {
 		lambda = 9.8425e8 / (LR.frq_mhz * 1e6);
 		d = FEET_PER_MILE * path.distance[path.length - 1];
@@ -1826,7 +1707,6 @@ void SeriesData(struct site source, struct site destination, char *name,
 		fd4 = fopen(fresnel60name, "wb");
 	}
 
-	/* Open absolute-coordinate data files (always metric, for profile chart) */
 	snprintf(terrainabsname, 254, "%s_terrain_abs", name);
 	snprintf(losabsname,     254, "%s_los_abs",     name);
 	fd_tabs = fopen(terrainabsname, "wb");
@@ -1843,9 +1723,9 @@ void SeriesData(struct site source, struct site destination, char *name,
 		remote.lon = path.lon[x];
 		remote.alt = 0.0;
 		terrain = GetElevation(remote);
-		ground_el = terrain;  /* raw ground elevation (feet), before antenna offset */
+		ground_el = terrain;
 		if (x == 0)
-			terrain += destination.alt;	/* RX antenna spike */
+			terrain += destination.alt;
 
 		a = terrain + earthradius;
 		cangle = FEET_PER_MILE * Distance(destination, remote) / earthradius;
@@ -1854,23 +1734,13 @@ void SeriesData(struct site source, struct site destination, char *name,
 							       DEG2RAD -
 							       cangle);
 		height = a - c;
-		/* LOS height AMSL (meters): linear interpolation TX antenna → RX antenna.
-		   Only computed when both endpoints have valid tile data (los_abs_valid). */
+
 		if (los_abs_valid) {
 			double frac = (d_total_miles > 0.0)
 			              ? path.distance[x] / d_total_miles : 0.0;
 			los_m_abs = METERS_PER_FOOT *
 			            (tx_amsl_ft + (rx_amsl_ft - tx_amsl_ft) * frac);
 		}
-
-		/* Per Fink and Christiansen, Electronics
-		 * Engineers' Handbook, 1989:
-		 *
-		 *   H = sqrt(lamba * d1 * (d - d1)/d)
-		 *
-		 * where H is the distance from the LOS
-		 * path to the first Fresnel zone boundary.
-		 */
 
 		if ((LR.frq_mhz >= 20.0) && (LR.frq_mhz <= 100000.0)
 		    && fresnel_plot) {
@@ -1915,9 +1785,6 @@ void SeriesData(struct site source, struct site destination, char *name,
 				KM_PER_MILE * path.distance[x],
 				METERS_PER_FOOT * (height - terrain));
 
-			/* Absolute-coordinate files (always metric).
-			   Skip points where GetElevation returned the -5000 sentinel
-			   (tile not loaded) to avoid spurious -1524 m spikes in the plot. */
 			if (ground_el > -4999.0) {
 				if (fd_tabs) fprintf(fd_tabs, "%.3f %.3f\n",
 					KM_PER_MILE * path.distance[x],
@@ -1949,7 +1816,7 @@ void SeriesData(struct site source, struct site destination, char *name,
 				fprintf(fd4, "%.3f %.3f\n",
 					KM_PER_MILE * path.distance[x],
 					METERS_PER_FOOT * fpt6_zone);
-				/* Absolute Fresnel zones (only when LOS endpoints are valid) */
+
 				if (los_abs_valid) {
 					if (fd_f1abs) fprintf(fd_f1abs, "%.3f %.3f\n",
 						KM_PER_MILE * path.distance[x],
@@ -1985,7 +1852,7 @@ void SeriesData(struct site source, struct site destination, char *name,
 
 		if ((height - terrain) < minearth)
 			minearth = height - terrain;
-	}			// End of loop
+	}
 
 	if (normalised)
 		r = -(nm * path.distance[path.length - 1]) - nb;
@@ -2043,7 +1910,6 @@ void SeriesData(struct site source, struct site destination, char *name,
 		fclose(fd4);
 	}
 
-	/* Write TX endpoint and close absolute-coordinate files */
 	{
 		double last_km   = KM_PER_MILE * path.distance[path.length - 1];
 		double tx_gnd_m  = METERS_PER_FOOT * GetElevation(source);

@@ -16,23 +16,13 @@
 
 double HATApathLoss(float f, float h_B, float h_M, float d, int mode)
 {
-/*
-HATA URBAN model for cellular planning
-Frequency (MHz) 150 to 1500MHz
-Base station height 30-200m
-Mobile station height 1-10m
-Distance 1-20km
 
-mode 1 = URBAN
-mode 2 = SUBURBAN
-mode 3 = OPEN
-*/
 float lh_M;
 float C_H;
 float logf = log10(f);
 
 	if(f<200){
-		lh_M = log10(1.54 * h_M);	
+		lh_M = log10(1.54 * h_M);
 		C_H = 8.29 * (lh_M * lh_M) - 1.1;
 	}else{
 		lh_M = log10(11.75 * h_M);
@@ -42,15 +32,15 @@ float logf = log10(f);
 	float L_u = 69.55 + 26.16 * logf - 13.82 * log10(h_B) - C_H + (44.9 - 6.55 * log10(h_B)) * log10(d);
 
 	if (!mode || mode == 1) {
-		return L_u;	//URBAN
+		return L_u;
 	}
 
-	if (mode == 2) {	//SUBURBAN
+	if (mode == 2) {
 		float logf_28 = log10(f / 28);
 		return L_u - 2 * logf_28 * logf_28 - 5.4;
 	}
 
-	if (mode == 3) {	//OPEN
+	if (mode == 3) {
 		return L_u - 4.78 * logf * logf + 18.33 * logf - 40.94;
 	}
 

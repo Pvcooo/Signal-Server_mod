@@ -11,14 +11,10 @@
  *                                                                           *
 \*****************************************************************************/
 
-// *************************************
-// C++ routines for this program are taken from
-// a translation of the FORTRAN code written by
 // U.S. Department of Commerce NTIA/ITS
 // Institute for Telecommunication Sciences
-// *****************
+
 // Irregular Terrain Model (ITM) (Longley-Rice)
-// *************************************
 
 #include <math.h>
 #include <complex>
@@ -109,8 +105,6 @@ double mymax(const double &a, const double &b)
 
 double FORTRAN_DIM(const double &x, const double &y)
 {
-	// This performs the FORTRAN DIM function.
-	// result is x-y if x is greater than y; otherwise result is 0.0
 
 	if (x > y)
 		return x - y;
@@ -135,8 +129,6 @@ double fht(const double &x, const double &pk)
 	double w, fhtv;
 	if (x < 200.0) {
 		w = -log(pk);
-
-		/* if (pk < 1e-5 || x*pow(w,3.0) > 5495.0 ) */
 
 		if (pk < 1e-5 || (x * w * w * w) > 5495.0) {
 			fhtv = -117.0;
@@ -184,7 +176,6 @@ double h0f(double r, double et)
 	else
 		q = et - it;
 
-	/* x=pow(1.0/r,2.0); */
 	x = (1.0 / r);
 	x *= x;
 	h0fv = 4.343 * log((a[it - 1] * x + b[it - 1]) * x + 1.0);
@@ -243,7 +234,7 @@ double adiff(double d, prop_type & prop, propa_type & propa)
 		xht = 0.0;
 
 		for (int j = 0; j < 2; ++j) {
-			/* a=0.5*pow(prop.dl[j],2.0)/prop.he[j]; */
+
 			a = 0.5 * (prop.dl[j] * prop.dl[j]) / prop.he[j];
 			wa = pow(a * prop.wn, THIRD);
 			pk = qk / wa;
@@ -258,7 +249,7 @@ double adiff(double d, prop_type & prop, propa_type & propa)
 	else {
 		th = propa.tha + d * prop.gme;
 		ds = d - propa.dla;
-		/* q=0.0795775*prop.wn*ds*pow(th,2.0); */
+
 		q = 0.0795775 * prop.wn * ds * th * th;
 		adiffv =
 		    aknfe(q * prop.dl[0] / (ds + prop.dl[0])) +
@@ -308,14 +299,14 @@ double ascat(double d, prop_type & prop, propa_type & propa)
 			r2 *= prop.he[1];
 
 			if (r1 < 0.2 && r2 < 0.2)
-				return 1001.0;	// <==== early return
+				return 1001.0;
 
 			ss = (d - ad) / (d + ad);
 			q = rr / ss;
 			ss = mymax(0.1, ss);
 			q = mymin(mymax(0.1, q), 10.0);
 			z0 = (d - ad) * (d + ad) * th * 0.25 / d;
-			/* et=(etq*exp(-pow(mymin(1.7,z0/8.0e3),6.0))+1.0)*z0/1.7556e3; */
+
 			temp = mymin(1.7, z0 / 8.0e3);
 			temp = temp * temp * temp * temp * temp * temp;
 			et = (etq * exp(-temp) + 1.0) * z0 / 1.7556e3;
@@ -341,7 +332,6 @@ double ascat(double d, prop_type & prop, propa_type & propa)
 
 		h0s = h0;
 		th = propa.tha + d * prop.gme;
-		/* ascatv=ahd(th*d)+4.343*log(47.7*prop.wn*pow(th,4.0))-0.1*(prop.ens-301.0)*exp(-th*d/40e3)+h0; */
 
 		ascatv =
 		    ahd(th * d) +
@@ -493,7 +483,7 @@ void qlra(int kst[], int klimx, int mdvarx, prop_type & prop,
 	}
 }
 
-void lrprop(double d, prop_type & prop, propa_type & propa)	// PaulM_lrprop
+void lrprop(double d, prop_type & prop, propa_type & propa)
 {
 	static bool wlos, wscat;
 	static double dmin, xae;
@@ -543,7 +533,7 @@ void lrprop(double d, prop_type & prop, propa_type & propa)	// PaulM_lrprop
 
 		dmin = abs(prop.he[0] - prop.he[1]) / 200e-3;
 		q = adiff(0.0, prop, propa);
-		/* xae=pow(prop.wn*pow(prop.gme,2),-THIRD); */
+
 		xae = pow(prop.wn * prop.gme * prop.gme, -THIRD);
 		d3 = mymax(propa.dlsa, 1.3787 * xae + propa.dla);
 		d4 = d3 + 2.7574 * xae;
@@ -681,7 +671,6 @@ void lrprop(double d, prop_type & prop, propa_type & propa)	// PaulM_lrprop
 double curve(double const &c1, double const &c2, double const &x1,
 	     double const &x2, double const &x3, double const &de)
 {
-	/* return (c1+c2/(1.0+pow((de-x2)/x3,2.0)))*pow(de/x1,2.0)/(1.0+pow(de/x1,2.0)); */
 
 	double temp1, temp2;
 
@@ -792,9 +781,6 @@ double avar(double zzt, double zzl, double zzc, prop_type & prop,
 		case 3:
 			q = log(0.133 * prop.wn);
 
-			/* gm=cfm1+cfm2/(pow(cfm3*q,2.0)+1.0); */
-			/* gp=cfp1+cfp2/(pow(cfp3*q,2.0)+1.0); */
-
 			gm = cfm1 + cfm2 / ((cfm3 * q * cfm3 * q) + 1.0);
 			gp = cfp1 + cfp2 / ((cfp3 * q * cfp3 * q) + 1.0);
 
@@ -827,7 +813,7 @@ double avar(double zzt, double zzl, double zzc, prop_type & prop,
 		if (ws)
 			vs0 = 0.0;
 		else {
-			/* vs0=pow(5.0+3.0*exp(-de/100e3),2.0); */
+
 			vs0 = (5.0 + 3.0 * exp(-de / 100e3));
 			vs0 *= vs0;
 		}
@@ -865,7 +851,6 @@ double avar(double zzt, double zzl, double zzc, prop_type & prop,
 	else
 		sgt = sgtd + tgtd / zt;
 
-	/* vs=vs0+pow(sgt*zt,2.0)/(rt+zc*zc)+pow(sgl*zl,2.0)/(rl+zc*zc); */
 	vs = vs0 + (sgt * zt * sgt * zt) / (rt + zc * zc) +
 	    (sgl * zl * sgl * zl) / (rl + zc * zc);
 
@@ -1080,7 +1065,7 @@ double d1thx(double pfl[], const double &x1, const double &x2)
 	xb = x2 / pfl[1];
 	d1thxv = 0.0;
 
-	if (xb - xa < 2.0)	// exit out
+	if (xb - xa < 2.0)
 		return d1thxv;
 
 	ka = (int)(0.1 * (xb - xa + 8.0));
@@ -1154,7 +1139,7 @@ void qlrpfl(double pfl[], int klimx, int mdvarx, prop_type & prop,
 		q = prop.dl[0] + prop.dl[1];
 
 		if (q <= prop.dist) {
-			/* q=pow(prop.dist/q,2.0); */
+
 			q = ((prop.dist / q) * (prop.dist / q));
 
 			for (j = 0; j < 2; j++) {
@@ -1202,29 +1187,11 @@ double deg2rad(double d)
 	return d * 3.1415926535897 / 180.0;
 }
 
-//********************************************************
-//* Point-To-Point Mode Calculations                     *
-//********************************************************
-
 void point_to_point(double tht_m, double rht_m, double eps_dielect,
 		    double sgm_conductivity, double eno_ns_surfref,
 		    double frq_mhz, int radio_climate, int pol, double conf,
 		    double rel, double &dbloss, char *strmode, int &errnum)
 {
-	// pol: 0-Horizontal, 1-Vertical
-	// radio_climate: 1-Equatorial, 2-Continental Subtropical, 3-Maritime Tropical,
-	//                4-Desert, 5-Continental Temperate, 6-Maritime Temperate, Over Land,
-	//                7-Maritime Temperate, Over Sea
-	// conf, rel: .01 to .99
-	// elev[]: [num points - 1], [delta dist(meters)], [height(meters) point 1], ..., [height(meters) point n]
-	// errnum: 0- No Error.
-	//         1- Warning: Some parameters are nearly out of range.
-	//                     Results should be used with caution.
-	//         2- Note: Default parameters have been substituted for impossible ones.
-	//         3- Warning: A combination of parameters is out of range.
-	//                     Results are probably invalid.
-	//         Other-  Warning: Some parameters are out of range.
-	//                          Results are probably invalid.
 
 	prop_type prop;
 	propv_type propv;
@@ -1234,7 +1201,7 @@ void point_to_point(double tht_m, double rht_m, double eps_dielect,
 	double zc, zr;
 	double eno, enso, q;
 	long ja, jb, i, np;
-	//double dkm, xkm;
+
 	double fs;
 
 	prop.hg[0] = tht_m;
@@ -1245,15 +1212,14 @@ void point_to_point(double tht_m, double rht_m, double eps_dielect,
 	prop.mdp = -1;
 	zc = qerfi(conf);
 	zr = qerfi(rel);
-	np = (long)elev[0];	//number of points
-	//dkm=(elev[1]*elev[0])/1000.0; // total distance in km. elev[1]=90(m) (default)
-	//xkm=elev[1]/1000.0; // distance between points in km
+	np = (long)elev[0];
+
 	eno = eno_ns_surfref;
 	enso = 0.0;
 	q = enso;
 
 	if (q <= 0.0) {
-		/* ja = 3.0 + 0.1 * elev[0]; */
+
 		ja = (long)(3.0 + 0.1 * elev[0]);
 
 		jb = np - ja + 6;
@@ -1299,27 +1265,6 @@ void point_to_pointMDH(double tht_m, double rht_m, double eps_dielect,
 		       double &dbloss, int &propmode, double &deltaH,
 		       int &errnum)
 {
-	// pol: 0-Horizontal, 1-Vertical
-	// radio_climate: 1-Equatorial, 2-Continental Subtropical, 3-Maritime Tropical,
-	//                4-Desert, 5-Continental Temperate, 6-Maritime Temperate, Over Land,
-	//                7-Maritime Temperate, Over Sea
-	// timepct, locpct, confpct: .01 to .99
-	// elev[]: [num points - 1], [delta dist(meters)], [height(meters) point 1], ..., [height(meters) point n]
-	// propmode:  Value   Mode
-	//             -1     mode is undefined
-	//              0     Line of Sight
-	//              5     Single Horizon, Diffraction
-	//              6     Single Horizon, Troposcatter
-	//              9     Double Horizon, Diffraction
-	//             10     Double Horizon, Troposcatter
-	// errnum: 0- No Error.
-	//         1- Warning: Some parameters are nearly out of range.
-	//                     Results should be used with caution.
-	//         2- Note: Default parameters have been substituted for impossible ones.
-	//         3- Warning: A combination of parameters is out of range.
-	//                     Results are probably invalid.
-	//         Other-  Warning: Some parameters are out of range.
-	//                          Results are probably invalid.
 
 	prop_type prop;
 	propv_type propv;
@@ -1328,10 +1273,10 @@ void point_to_pointMDH(double tht_m, double rht_m, double eps_dielect,
 	double ztime, zloc, zconf;
 	double eno, enso, q;
 	long ja, jb, i, np;
-	//double dkm, xkm;
+
 	double fs;
 
-	propmode = -1;		// mode is undefined
+	propmode = -1;
 	prop.hg[0] = tht_m;
 	prop.hg[1] = rht_m;
 	propv.klim = radio_climate;
@@ -1343,14 +1288,13 @@ void point_to_pointMDH(double tht_m, double rht_m, double eps_dielect,
 	zconf = qerfi(confpct);
 
 	np = (long)elev[0];
-	//dkm=(elev[1]*elev[0])/1000.0;
-	//xkm=elev[1]/1000.0;
+
 	eno = eno_ns_surfref;
 	enso = 0.0;
 	q = enso;
 
 	if (q <= 0.0) {
-		/* ja = 3.0 + 0.1 * elev[0]; */
+
 		ja = (long)(3.0 + 0.1 * elev[0]);
 		jb = np - ja + 6;
 
@@ -1369,22 +1313,22 @@ void point_to_pointMDH(double tht_m, double rht_m, double eps_dielect,
 	q = prop.dist - propa.dla;
 
 	if (int (q) < 0.0)
-		propmode = 0;	// Line-Of-Sight Mode
+		propmode = 0;
 	else {
 		if (int (q) == 0.0)
-			propmode = 4;	// Single Horizon
+			propmode = 4;
 
 		else if (int (q) > 0.0)
-			propmode = 8;	// Double Horizon
+			propmode = 8;
 
 		if (prop.dist <= propa.dlsa || prop.dist <= propa.dx)
-			propmode += 1;	// Diffraction Dominant
+			propmode += 1;
 
 		else if (prop.dist > propa.dx)
-			propmode += 2;	// Troposcatter Dominant
+			propmode += 2;
 	}
 
-	dbloss = avar(ztime, zloc, zconf, prop, propv) + fs;	//avar(time,location,confidence)
+	dbloss = avar(ztime, zloc, zconf, prop, propv) + fs;
 	errnum = prop.kwx;
 }
 
@@ -1393,20 +1337,6 @@ void point_to_pointDH(double tht_m, double rht_m, double eps_dielect,
 		      double frq_mhz, int radio_climate, int pol, double conf,
 		      double rel, double &dbloss, double &deltaH, int &errnum)
 {
-	// pol: 0-Horizontal, 1-Vertical
-	// radio_climate: 1-Equatorial, 2-Continental Subtropical, 3-Maritime Tropical,
-	//                4-Desert, 5-Continental Temperate, 6-Maritime Temperate, Over Land,
-	//                7-Maritime Temperate, Over Sea
-	// conf, rel: .01 to .99
-	// elev[]: [num points - 1], [delta dist(meters)], [height(meters) point 1], ..., [height(meters) point n]
-	// errnum: 0- No Error.
-	//         1- Warning: Some parameters are nearly out of range.
-	//                     Results should be used with caution.
-	//         2- Note: Default parameters have been substituted for impossible ones.
-	//         3- Warning: A combination of parameters is out of range.
-	//                     Results are probably invalid.
-	//         Other-  Warning: Some parameters are out of range.
-	//                          Results are probably invalid.
 
 	char strmode[100];
 	prop_type prop;
@@ -1416,7 +1346,7 @@ void point_to_pointDH(double tht_m, double rht_m, double eps_dielect,
 	double zc, zr;
 	double eno, enso, q;
 	long ja, jb, i, np;
-	//double dkm, xkm;
+
 	double fs;
 
 	prop.hg[0] = tht_m;
@@ -1428,14 +1358,13 @@ void point_to_pointDH(double tht_m, double rht_m, double eps_dielect,
 	zc = qerfi(conf);
 	zr = qerfi(rel);
 	np = (long)elev[0];
-	//dkm=(elev[1]*elev[0])/1000.0;
-	//xkm=elev[1]/1000.0;
+
 	eno = eno_ns_surfref;
 	enso = 0.0;
 	q = enso;
 
 	if (q <= 0.0) {
-		/* ja = 3.0 + 0.1 * elev[0]; */
+
 		ja = (long)(3.0 + 0.1 * elev[0]);
 
 		jb = np - ja + 6;
@@ -1470,13 +1399,9 @@ void point_to_pointDH(double tht_m, double rht_m, double eps_dielect,
 			strcat(strmode, ", Troposcatter Dominant");
 	}
 
-	dbloss = avar(zr, 0.0, zc, prop, propv) + fs;	//avar(time,location,confidence)
+	dbloss = avar(zr, 0.0, zc, prop, propv) + fs;
 	errnum = prop.kwx;
 }
-
-//********************************************************
-//* Area Mode Calculations                               *
-//********************************************************
 
 void area(long ModVar, double deltaH, double tht_m, double rht_m,
 	  double dist_km, int TSiteCriteria, int RSiteCriteria,
@@ -1485,26 +1410,6 @@ void area(long ModVar, double deltaH, double tht_m, double rht_m,
 	  double pctLoc, double pctConf, double &dbloss, char *strmode,
 	  int &errnum)
 {
-	// pol: 0-Horizontal, 1-Vertical
-	// TSiteCriteria, RSiteCriteria:
-	//                 0 - random, 1 - careful, 2 - very careful
-	// radio_climate: 1-Equatorial, 2-Continental Subtropical, 3-Maritime Tropical,
-	//                4-Desert, 5-Continental Temperate, 6-Maritime Temperate, Over Land,
-	//                7-Maritime Temperate, Over Sea
-	// ModVar: 0 - Single: pctConf is "Time/Situation/Location", pctTime, pctLoc not used
-	//         1 - Individual: pctTime is "Situation/Location", pctConf is "Confidence", pctLoc not used
-	//         2 - Mobile: pctTime is "Time/Locations (Reliability)", pctConf is "Confidence", pctLoc not used
-	//         3 - Broadcast: pctTime is "Time", pctLoc is "Location", pctConf is "Confidence"
-	// pctTime, pctLoc, pctConf: .01 to .99
-	// errnum: 0- No Error.
-	//         1- Warning: Some parameters are nearly out of range.
-	//                     Results should be used with caution.
-	//         2- Note: Default parameters have been substituted for impossible ones.
-	//         3- Warning: A combination of parameters is out of range.
-	//                     Results are probably invalid.
-	//         Other-  Warning: Some parameters are out of range.
-	//                          Results are probably invalid.
-	// NOTE: strmode is not used at this time.
 
 	prop_type prop;
 	propv_type propv;
@@ -1527,7 +1432,7 @@ void area(long ModVar, double deltaH, double tht_m, double rht_m,
 	prop.dh = deltaH;
 	prop.hg[0] = tht_m;
 	prop.hg[1] = rht_m;
-	/* propv.klim = (__int32) radio_climate; */
+
 	propv.klim = (long)radio_climate;
 	prop.ens = eno;
 	prop.kwx = 0;

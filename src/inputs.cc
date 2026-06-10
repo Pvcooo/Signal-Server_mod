@@ -11,13 +11,13 @@
 #include "main.hh"
 #include "tiles.hh"
 #include "gdal_priv.h"
+#include "gdal_utils.h"
 #include "ogr_spatialref.h"
 #include <bzlib.h>
 #include <zlib.h>
 
 #define BZBUFFER 65536
 #define GZBUFFER 32768
-
 
 static char buffer[BZBUFFER+1];
 
@@ -29,16 +29,9 @@ extern long bzbuf_pointer, bzbytes_read, gzbuf_pointer, gzbytes_read;
 
 extern double antenna_rotation,antenna_downtilt,antenna_dt_direction;
 
-
 int loadClutter(char *filename, double radius, struct site tx)
 {
-	/* This function reads a MODIS 17-class clutter file in ASCII Grid format.
-	   The nominal heights it applies to each value, eg. 5 (Mixed forest) = 15m are 
-	   taken from ITU-R P.452-11.
-	   It doesn't have it's own matrix, instead it boosts the DEM matrix like point clutter
-	   AddElevation(lat, lon, height);
- 	   If tiles are standard 2880 x 3840 then cellsize is constant at 0.004166
-	 */
+
 	int x, y, z, h = 0, w = 0;
 	double clh, xll, yll, cellsize, cellsize2, xOffset, yOffset, lat, lon;
 	char line[100000];
@@ -68,7 +61,7 @@ int loadClutter(char *filename, double radius, struct site tx)
 			fprintf(stderr, "\nError Loading clutter file, unsupported resolution %d x %d.\n", w,h);
 			fflush(stderr);
 		}
-		return 0; // can't work with this yet
+		return 0;
 	}
 
 	if (debug) {
@@ -90,40 +83,36 @@ int loadClutter(char *filename, double radius, struct site tx)
 		fflush(stderr);
 	}
 
-	s = fgets(line, 25, fd); // cellsize
+	s = fgets(line, 25, fd);
 
 	if (s)
 	  ;
 
-	//loop over matrix
 	for (y = h; y > 0; y--) {
 		x = 0;
 		if (fgets(line, sizeof(line)-1, fd) != NULL) {
 			pch = strtok(line, " ");
 			while (pch != NULL && x < w) {
 				z = atoi(pch);
-				// Apply ITU-R P.452-11
-				// Treat classes 0, 9, 10, 11, 15, 16 as water, (Water, savanna, grassland, wetland, snow, barren)
+
 				clh = 0.0;
 
-				// evergreen, evergreen, urban
 				if(z == 1 || z == 2 || z == 13)
 					clh = 20.0;
-				// deciduous, deciduous, mixed
+
 				if(z==3 || z==4 || z==5)
 					clh = 15.0;
-				// woody shrublands & savannas
+
 				if(z==6 || z==8)
 					clh = 4.0;
-				// shrublands, savannas, croplands...
+
 				if(z==7 || z==9 || z==10 || z==12 || z==14)
 					clh = 2.0;
 
 				if(clh>1){
-					xOffset=x*cellsize; // 12 deg wide
-					yOffset=y*cellsize; // 16 deg high
+					xOffset=x*cellsize;
+					yOffset=y*cellsize;
 
-					// make all longitudes positive 
 					if(xll+xOffset>0){
 						lon=360-(xll+xOffset);
 					}else{
@@ -131,9 +120,8 @@ int loadClutter(char *filename, double radius, struct site tx)
 					}
 					lat = yll+yOffset;
 
-					// bounding box
 					if(lat > tx.lat - radius && lat < tx.lat + radius && lon > tx.lon - radius && lon < tx.lon + radius){
-						// not in near field
+
 						if((lat > tx.lat+cellsize2 || lat < tx.lat-cellsize2) || (lon > tx.lon + cellsize2 || lon < tx.lon - cellsize2)){
 							AddElevation(lat,lon,clh,2);
 						}
@@ -143,11 +131,11 @@ int loadClutter(char *filename, double radius, struct site tx)
 
 				x++;
 				pch = strtok(NULL, " ");
-			}//while
+			}
 		} else {
 			fprintf(stderr, "Clutter error @ x %d y %d\n", x, y);
-		}//if
-	}//for
+		}
+	}
 
 	fclose(fd);
 	return 0;
@@ -180,14 +168,6 @@ int averageHeight(int height, int width, int x, int y){
 	}
 }
 
-/*
- * tile_overlaps_roi
- * Fast bbox check: opens the file header only (no pixel data) and
- * checks whether the tile's WGS84 extent overlaps the circular ROI
- * described by (roi_lat, roi_lon_std) ± radius_deg in each axis.
- * Returns true if the tile should be loaded, false if it can be skipped.
- * On any GDAL error it conservatively returns true (include the tile).
- */
 static bool tile_overlaps_roi(const char *filename,
                                double roi_lat, double roi_lon_std,
                                double radius_lat_deg, double radius_lon_deg)
@@ -202,11 +182,10 @@ static bool tile_overlaps_roi(const char *filename,
     int w = ds->GetRasterXSize();
     int h = ds->GetRasterYSize();
 
-    /* Tile extent in source CRS */
     double x_min = gt[0];
     double y_max = gt[3];
     double x_max = gt[0] + gt[1] * w;
-    double y_min = gt[3] + gt[5] * h;   /* gt[5] < 0 */
+    double y_min = gt[3] + gt[5] * h;
 
     const char *proj = ds->GetProjectionRef();
     double lon_min, lon_max, lat_min, lat_max;
@@ -225,7 +204,7 @@ static bool tile_overlaps_roi(const char *filename,
         }
 
         if (!is_wgs84) {
-            /* Reproject the 4 corners to WGS84 */
+
             OGRSpatialReference srs_wgs84;
             srs_wgs84.SetWellKnownGeogCS("WGS84");
             srs_wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
@@ -251,14 +230,13 @@ static bool tile_overlaps_roi(const char *filename,
             lat_min = y_min; lat_max = y_max;
         }
     } else {
-        /* No CRS — assume values are already lat/lon */
+
         lon_min = x_min; lon_max = x_max;
         lat_min = y_min; lat_max = y_max;
     }
 
     GDALClose(ds);
 
-    /* AABB overlap test (include a 10% extra margin) */
     double mlat = radius_lat_deg * 1.1;
     double mlon = radius_lon_deg * 1.1;
     return !(lon_max < roi_lon_std - mlon ||
@@ -270,29 +248,36 @@ static bool tile_overlaps_roi(const char *filename,
 int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, double radius_miles)
 {
 	char *filename;
-	char *files[900]; // 20x20=400, 16x16=256 tiles
-	bool  files_allocd[900];   /* true if files[i] was malloc'd (dir scan) */
+	char *files[4096];
+	bool  files_allocd[4096];
 	int indx = 0, fc = 0, success;
 	double avgCellsize = 0, smCellsize = 0;
 	tile_t *tiles;
+	bool roi_merged = false;
+	char roi_vrt[64] = {0};
 
 	memset(files_allocd, 0, sizeof(files_allocd));
 
-	// Initialize global variables before processing files
-	min_west = 361; // any value will be lower than this
-	max_west = 0;   // any value will be higher than this
+	min_west = 361;
+	max_west = 0;
 
-	/* Tokenize the filenames string.
-	 * If a token is a directory, scan it for terrain files (.asc / .tif / .tiff).
-	 * This lets the user pass a single directory to -lid instead of listing
-	 * every tile file individually, e.g.:  -lid DTM_models  */
+	bool   roi_active = (tx_lat > -90.0 && tx_lat < 90.0 && radius_miles > 0.0);
+	double roi_lon_std = 0.0, roi_radius_lat = 0.0, roi_radius_lon = 0.0;
+	if (roi_active) {
+		double radius_km = radius_miles * 1.609344;
+		roi_radius_lat   = radius_km / 111.32;
+		double cos_lat   = cos(tx_lat * 3.14159265358979323846 / 180.0);
+		roi_radius_lon   = radius_km / (111.32 * (cos_lat > 0.01 ? cos_lat : 0.01));
+		roi_lon_std      = (tx_lon_west <= 180.0) ? -tx_lon_west : (360.0 - tx_lon_west);
+	}
+
 	filename = strtok(filenames, " ,");
-	while (filename != NULL && fc < 900) {
+	while (filename != NULL && fc < 4096) {
 		struct stat st;
 		int st_ret = stat(filename, &st);
 
 		if (st_ret == 0 && S_ISDIR(st.st_mode)) {
-			/* ---- DIRECTORY: scan for terrain files ---- */
+
 			DIR *d = opendir(filename);
 			if (!d) {
 				fprintf(stderr, "Error: cannot open directory '%s': %s\n",
@@ -303,8 +288,8 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			size_t dirlen = strlen(filename);
 			bool has_sep = (dirlen > 0 && filename[dirlen - 1] == '/');
 			struct dirent *ent;
-			int found = 0;
-			while ((ent = readdir(d)) != NULL && fc < 900) {
+			int found = 0, total_terrain = 0;
+			while ((ent = readdir(d)) != NULL && fc < 4096) {
 				const char *name = ent->d_name;
 				size_t n = strlen(name);
 				bool is_terrain =
@@ -312,36 +297,51 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 				    (n >= 4 && strcasecmp(name + n - 4, ".tif")  == 0) ||
 				    (n >= 5 && strcasecmp(name + n - 5, ".tiff") == 0);
 				if (!is_terrain) continue;
-				/* build full path: dir[/]name */
+
 				size_t pathlen = dirlen + (has_sep ? 0 : 1) + n + 1;
 				char *fullpath = (char*)malloc(pathlen);
 				if (!fullpath) { closedir(d); return ENOMEM; }
 				snprintf(fullpath, pathlen, "%s%s%s",
 				         filename, has_sep ? "" : "/", name);
+				total_terrain++;
+
+				if (roi_active &&
+				    !tile_overlaps_roi(fullpath, tx_lat, roi_lon_std,
+				                       roi_radius_lat, roi_radius_lon)) {
+					free(fullpath);
+					continue;
+				}
 				files[fc] = fullpath;
 				files_allocd[fc] = true;
 				fc++;
 				found++;
 			}
 			closedir(d);
-			fprintf(stderr, "Directory '%s': %d terrain file(s) found\n",
-			        filename, found);
+			fprintf(stderr, "Directory '%s': %d terrain file(s), %d overlap ROI\n",
+			        filename, total_terrain, found);
 			fflush(stderr);
-			if (found == 0) {
+			if (total_terrain == 0) {
 				fprintf(stderr, "Error: no .asc/.tif/.tiff files found in '%s'\n",
 				        filename);
 				fflush(stderr);
 				return ENOENT;
 			}
+			if (found == 0) {
+				fprintf(stderr, "Error: %d tile(s) in '%s' but none overlap the "
+				        "TX ROI — check coordinates or download the right area\n",
+				        total_terrain, filename);
+				fflush(stderr);
+				return ENOENT;
+			}
 
 		} else if (st_ret == 0 && S_ISREG(st.st_mode)) {
-			/* ---- REGULAR FILE: keep as-is ---- */
+
 			files[fc] = filename;
 			files_allocd[fc] = false;
 			fc++;
 
 		} else {
-			/* ---- PATH NOT FOUND or inaccessible ---- */
+
 			size_t n = strlen(filename);
 			bool has_terrain_ext =
 			    (n >= 4 && strcasecmp(filename + n - 4, ".asc")  == 0) ||
@@ -349,14 +349,13 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			    (n >= 5 && strcasecmp(filename + n - 5, ".tiff") == 0);
 
 			if (!has_terrain_ext) {
-				/* Looks like a directory/path that doesn't exist */
+
 				fprintf(stderr, "Error: '%s': no such file or directory\n",
 				        filename);
 				fflush(stderr);
 				return ENOENT;
 			}
-			/* Has a terrain extension — pass it through and let the
-			 * loader produce a specific error for this file */
+
 			files[fc] = filename;
 			files_allocd[fc] = false;
 			fc++;
@@ -370,20 +369,13 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		return ENOENT;
 	}
 
-	/* ----------------------------------------------------------------
-	 * Spatial filter: discard tiles that don't overlap the TX area.
-	 * This is critical when a directory contains hundreds of tiles
-	 * covering a large region but only a handful are needed for the
-	 * requested radius around the transmitter.
-	 * ---------------------------------------------------------------- */
 	if (tx_lat > -90.0 && tx_lat < 90.0 && radius_miles > 0.0) {
-		/* Convert radius to degrees */
-		double radius_km  = radius_miles * 1.609344; // tile_overlaps_roi already adds 10% bbox buffer
+
+		double radius_km  = radius_miles * 1.609344;
 		double radius_lat = radius_km / 111.32;
 		double cos_lat    = cos(tx_lat * 3.14159265358979323846 / 180.0);
 		double radius_lon = radius_km / (111.32 * (cos_lat > 0.01 ? cos_lat : 0.01));
 
-		/* Convert positive-westing → standard longitude (-180..+180) */
 		double tx_lon_std = (tx_lon_west <= 180.0) ? -tx_lon_west : (360.0 - tx_lon_west);
 
 		int fc_filtered = 0;
@@ -412,48 +404,105 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		}
 	}
 
-	/* Allocate the tile array */
+	if (roi_active && fc > 1) {
+		bool all_tif = true;
+		for (int i = 0; i < fc; i++) {
+			size_t n = strlen(files[i]);
+			bool t = (n >= 4 && strcasecmp(files[i] + n - 4, ".tif")  == 0) ||
+			         (n >= 5 && strcasecmp(files[i] + n - 5, ".tiff") == 0);
+			if (!t) { all_tif = false; break; }
+		}
+		if (all_tif) {
+			GDALAllRegister();
+
+			GDALDatasetH *src_ds =
+			    (GDALDatasetH*) calloc(fc, sizeof(GDALDatasetH));
+			int n_open = 0;
+			if (src_ds != NULL) {
+				for (int i = 0; i < fc; i++) {
+					GDALDatasetH d = GDALOpen(files[i], GA_ReadOnly);
+					if (d != NULL) src_ds[n_open++] = d;
+				}
+			}
+			snprintf(roi_vrt, sizeof(roi_vrt), "/vsimem/roi_%d.tif",
+			         (int)getpid());
+			const char *warp_argv[] = { "-t_srs", "EPSG:4326",
+			    "-r", "bilinear", "-of", "GTiff", "-overwrite", NULL };
+			GDALWarpAppOptions *wopt =
+			    GDALWarpAppOptionsNew((char**)warp_argv, NULL);
+			GDALDatasetH out = NULL;
+			if (src_ds != NULL && n_open > 0 && wopt != NULL)
+				out = GDALWarp(roi_vrt, NULL, n_open, src_ds, wopt, NULL);
+			if (wopt != NULL) GDALWarpAppOptionsFree(wopt);
+			for (int i = 0; i < n_open; i++) GDALClose(src_ds[i]);
+			if (src_ds != NULL) free(src_ds);
+
+			if (out != NULL) {
+				GDALClose(out);
+
+				GDALDatasetH chk = GDALOpen(roi_vrt, GA_ReadOnly);
+				bool merged_ok = (chk != NULL &&
+				                  GDALGetRasterXSize(chk) > 1 &&
+				                  GDALGetRasterYSize(chk) > 1 &&
+				                  GDALGetRasterCount(chk) >= 1);
+				if (chk != NULL) GDALClose(chk);
+				if (merged_ok) {
+					for (int i = 0; i < fc; i++)
+						if (files_allocd[i]) free(files[i]);
+					files[0] = strdup(roi_vrt);
+					files_allocd[0] = true;
+					fprintf(stderr, "Seamless mode: warped %d ROI tile(s) into "
+					        "one WGS84 grid (any/mixed CRS)\n", fc);
+					fflush(stderr);
+					fc = 1;
+					roi_merged = true;
+				} else {
+					VSIUnlink(roi_vrt);
+					roi_vrt[0] = '\0';
+					fprintf(stderr, "Merged mosaic not usable; per-tile loading "
+					        "(seams may appear)\n");
+					fflush(stderr);
+				}
+			} else {
+				fprintf(stderr, "Warp merge failed; per-tile loading (seams "
+				        "may appear)\n");
+				fflush(stderr);
+				roi_vrt[0] = '\0';
+			}
+		}
+	}
+
 	if( (tiles = (tile_t*) calloc(fc+1, sizeof(tile_t))) == NULL ) {
 		if (debug)
 			fprintf(stderr,"Could not allocate %d\n tiles",fc+1);
 		return ENOMEM;
 	}
 
-	/* Pre-compute load_resample here so it is in scope after the loop
-	 * (used when deciding whether tile_rescale is a no-op). */
 	int load_resample = (resample > 1) ? resample : 1;
 
-	/* Load each tile in turn */
 	for (indx = 0; indx < fc; indx++) {
 
-		/* Grab the tile metadata */
-		/* Decide loader by file extension:
-		 *   .tif / .tiff  → GDAL (with automatic reprojection to WGS84)
-		 *   .asc          → try GDAL first (supports projected CRS via .prj sidecar),
-		 *                   fall back to the legacy ASCII-grid loader if GDAL fails
-		 *   anything else → legacy ASCII-grid loader */
 		const char *fn = files[indx];
 		size_t n = strlen(fn);
 
 		bool is_tif = (n >= 4 && strcasecmp(fn + n - 4, ".tif")  == 0) ||
-		              (n >= 5 && strcasecmp(fn + n - 5, ".tiff") == 0);
+		              (n >= 5 && strcasecmp(fn + n - 5, ".tiff") == 0) ||
+		              (n >= 4 && strcasecmp(fn + n - 4, ".vrt")  == 0);
 		bool is_asc = (n >= 4 && strcasecmp(fn + n - 4, ".asc")  == 0);
 
 		if (is_tif) {
 			success = tile_load_geotiff(&tiles[indx], files[indx], load_resample);
 		} else if (is_asc) {
-			/* Try GDAL first — handles projected CRS (e.g. EPSG:25830 Navarra MDT)
-			 * when a .prj sidecar file is present.  Falls back to the legacy
-			 * loader for plain WGS84 ASCII grids that have no projection file. */
+
 			success = tile_load_geotiff(&tiles[indx], files[indx], load_resample);
-			if (success != 0) {
-				if (debug) {
-					fprintf(stderr, "GDAL failed for %s (rc=%d), trying legacy ASCII-grid loader\n",
-					        files[indx], success);
+				if (success != 0) {
+					fprintf(stderr, "Warning: '%s' has no readable CRS (.prj "
+					        "missing?); assuming WGS84 lat/lon. A projected ASCII "
+					        "grid needs a .prj sidecar to be reprojected.\n",
+					        files[indx]);
 					fflush(stderr);
+					success = tile_load_lidar(&tiles[indx], files[indx]);
 				}
-				success = tile_load_lidar(&tiles[indx], files[indx]);
-			}
 		} else {
 			success = tile_load_lidar(&tiles[indx], files[indx]);
 		}
@@ -470,16 +519,14 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			fflush(stderr);
 		}
 
-		// Increase the "average" cell size
 		avgCellsize += tiles[indx].cellsize;
-		// Update the smallest cell size
+
 		if (smCellsize == 0 || tiles[indx].cellsize < smCellsize) {
 			smCellsize = tiles[indx].cellsize;
 		}
 
-		// Update a bunch of globals
 		if (tiles[indx].max_el > max_elevation)
-			max_elevation = tiles[indx].max_el; 
+			max_elevation = tiles[indx].max_el;
 		if (tiles[indx].min_el < min_elevation)
 			min_elevation = tiles[indx].min_el;
 
@@ -489,10 +536,9 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		if (min_north == 90 || tiles[indx].min_north < min_north)
 			min_north = tiles[indx].min_north;
 
-		//Meridian switch. max_west=0
 		if (abs(tiles[indx].max_west - max_west) < 180 || tiles[indx].max_west < 360) {
 		        if (tiles[indx].max_west > max_west)
-			        max_west = tiles[indx].max_west; // update highest value
+			        max_west = tiles[indx].max_west;
 		} else {
 		        if (tiles[indx].max_west < max_west)
 			        max_west = tiles[indx].max_west;
@@ -504,12 +550,13 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			if (tiles[indx].min_west > min_west)
 				min_west = tiles[indx].min_west;
 		}
-		// Handle tile with 360 XUR
+
 		if(min_west>359) min_west=0.0;
 	}
 
-	/* Iterate through all of the tiles to find the smallest resolution. We will
-	 * need to rescale every tile from here on out to this value */
+	if (roi_merged && roi_vrt[0] != '\0')
+		VSIUnlink(roi_vrt);
+
 	float smallest_res = 0;
 	for (size_t i = 0; i < (unsigned)fc; i++) {
 		if ( smallest_res == 0 || tiles[i].resolution < smallest_res ){
@@ -517,22 +564,17 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		}
 	}
 
-	/* Now we need to rescale all tiles the the lowest resolution or the requested resolution. ie if we have
-	 * one 1m lidar and one 2m lidar, resize the 2m to fake 1m */
 	float desired_resolution = resample != 0 && smallest_res < resample ? resample : smallest_res;
 
 	if(resample>1){
-		/* If GDAL already downsampled during tile_load_geotiff (load_resample>1),
-		 * tiles[i].resolution already reflects the reduced resolution — don't
-		 * multiply again, or we would double-apply the resample factor. */
+
 		if(load_resample > 1){
-			desired_resolution = smallest_res; // already at target, rescale=1 → no-op
+			desired_resolution = smallest_res;
 		} else {
 			desired_resolution=smallest_res*resample;
 		}
 	}
 
-	// Don't resize large 1 deg tiles in large multi-degree plots as it gets messy
 	if(tiles[0].width != 3600){
 
 	  for (size_t i = 0; i < (unsigned)fc; i++) {
@@ -552,7 +594,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 
 	}
 
-	/* Now we work out the size of the giant lidar tile. */
 	if(debug){
 		fprintf(stderr,"mw:%lf Mnw:%lf\n", max_west, min_west);
 	}
@@ -562,14 +603,12 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		fprintf(stderr,"totalh: %.7f - %.7f = %.7f totalw: %.7f - %.7f = %.7f fc: %d\n", max_north, min_north, total_height, max_west, min_west, total_width,fc);
 	}
 
-	//detect problematic layouts eg. vertical rectangles
-	// 1x2
 	if(fc >= 2 && desired_resolution < 28 && total_height > total_width*1.5){
 		tiles[fc].max_north=max_north;
 		tiles[fc].min_north=min_north;
-		westoffset=westoffset-(total_height-total_width); // WGS84 for stdout only
-		max_west=max_west+(total_height-total_width); // Positive westing
-		tiles[fc].max_west=max_west; // Positive westing
+		westoffset=westoffset-(total_height-total_width);
+		max_west=max_west+(total_height-total_width);
+		tiles[fc].max_west=max_west;
 		tiles[fc].min_west=max_west;
 		tiles[fc].ppdy=tiles[fc-1].ppdy;
 		tiles[fc].ppdy=tiles[fc-1].ppdx;
@@ -578,28 +617,24 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		tiles[fc].data=tiles[fc-1].data;
 		fc++;
 
-		//calculate deficit
-
 		if (debug) {
 		        fprintf(stderr,"deficit: %.4f cellsize: %.9f tiles needed to square: %.1f, desired_resolution %f\n", total_width-total_height, avgCellsize, (total_width-total_height)/avgCellsize, (float)desired_resolution);
 			fflush (stderr);
 		}
 	}
-	// 2x1
+
 	if (fc >= 2 && desired_resolution < 28 && total_width > total_height*1.5) {
 		tiles[fc].max_north=max_north+(total_width-total_height);
 		tiles[fc].min_north=max_north;
-		tiles[fc].max_west=max_west; // Positive westing
-		max_north=max_north+(total_width-total_height); // Positive westing
+		tiles[fc].max_west=max_west;
+		max_north=max_north+(total_width-total_height);
 		tiles[fc].min_west=min_west;
 		tiles[fc].ppdy=tiles[fc-1].ppdy;
 		tiles[fc].ppdy=tiles[fc-1].ppdx;
-		tiles[fc].width=total_width; 
+		tiles[fc].width=total_width;
 		tiles[fc].height=(total_width-total_height);
 		tiles[fc].data=tiles[fc-1].data;
 		fc++;
-
-		//calculate deficit
 
 		if (debug) {
 			fprintf(stderr,"deficit: %.4f cellsize: %.9f tiles needed to square: %.1f\n", total_width-total_height,avgCellsize,(total_width-total_height)/avgCellsize);
@@ -621,7 +656,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		if (debug)
 			fprintf(stderr,"north_pixel_offset %zu west_pixel_offset %zu, %zu x %zu\n", north_pixel_offset, west_pixel_offset,new_height,new_width);
 
-      		//sanity check!
         	if (new_width > 39e3 || new_height > 39e3) {
                 	fprintf(stdout,"Not processing a tile with these dimensions: %zu x %zu\n",new_width,new_height);
                 	exit(1);
@@ -644,15 +678,11 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		fflush(stderr);
 	}
 
-	/* ...If we wanted a value other than sea level here, we would
-	   need to initialize the array... */
-
-	/* Fill out the array one tile at a time */
 	for (size_t i = 0; i < (unsigned)fc; i++) {
 		double north_offset = max_north - tiles[i].max_north;
 		double west_offset = max_west - tiles[i].max_west >= 0 ? max_west - tiles[i].max_west : max_west + (360 - tiles[i].max_west);
 		size_t north_pixel_offset = north_offset * tiles[i].ppdy;
-		size_t west_pixel_offset = west_offset * tiles[i].ppdx; 
+		size_t west_pixel_offset = west_offset * tiles[i].ppdx;
 
 		if (debug) {
 			fprintf(stderr,"mn: %lf mw:%lf globals: %lf %lf\n", tiles[i].max_north, tiles[i].max_west, max_north, max_west);
@@ -661,11 +691,10 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			fflush(stderr);
 		}
 
-		/* Copy it row-by-row from the tile */
 		for (size_t h = 0; h < (unsigned)tiles[i].height; h++) {
 			register short *dest_addr = &new_tile[ (north_pixel_offset+h)*new_width + west_pixel_offset];
 			register short *src_addr = &tiles[i].data[h*tiles[i].width];
-			// Check if we might overflow
+
 			if ( dest_addr + tiles[i].width > new_tile + new_tile_alloc || dest_addr < new_tile ){
 			        if (debug) {
 					fprintf(stderr, "Overflow %zu\n",i);
@@ -677,7 +706,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		}
 	}
 
-	// SUPER tile
 	MAXPAGES = 1;
 	IPPD = MAX(new_width,new_height);
 	ippd=IPPD;
@@ -693,7 +721,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		fflush(stderr);
 	}
 
-	/* Load the data into the global dem array */
 	dem[0].max_north = max_north;
 	dem[0].min_west = min_west;
 	dem[0].min_north = min_north;
@@ -701,10 +728,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 	dem[0].max_el = max_elevation;
 	dem[0].min_el = min_elevation;
 
-	/*
-	 * Copy the lidar tile data into the dem array. The dem array is then rotated
-	 * 90 degrees(!)...it's a legacy thing.
-	 */
 	int y = new_height-1;
 	for (size_t h = 0; h < new_height; h++, y--) {
 		int x = new_width-1;
@@ -715,7 +738,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 		}
 	}
 
-	//Polyfilla for warped tiles
 	y = new_height-2;
 	for (size_t h = 0; h < new_height-2; h++, y--) {
 		int x = new_width-2;
@@ -743,7 +765,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 			tile_destroy(&tiles[i]);
 	free(tiles);
 
-	/* Free paths that were malloc'd during directory scanning */
 	for (int i = 0; i < fc; i++)
 		if (files_allocd[i])
 			free(files[i]);
@@ -753,12 +774,6 @@ int loadLIDAR(char *filenames, int resample, double tx_lat, double tx_lon_west, 
 
 int LoadSDF_SDF(char *name)
 {
-	/* This function reads uncompressed ss Data Files (.sdf)
-	   containing digital elevation model data into memory.
-	   Elevation data, maximum and minimum elevations, and
-	   quadrangle limits are stored in the first available
-	   dem[] structure. 
-	   NOTE: On error, this function returns a negative errno */
 
 	int x, y, data = 0, indx, minlat, minlon, maxlat, maxlon, j;
 	char found, free_page = 0, line[20], jline[20], sdf_file[255],
@@ -771,8 +786,6 @@ int LoadSDF_SDF(char *name)
 
 	sdf_file[x] = 0;
 
-	/* Parse filename for minimum latitude and longitude values */
-
 	if( sscanf(sdf_file, "%d:%d:%d:%d", &minlat, &maxlat, &minlon, &maxlon) != 4 )
 		return -EINVAL;
 
@@ -782,8 +795,6 @@ int LoadSDF_SDF(char *name)
 	sdf_file[x + 3] = 'f';
 	sdf_file[x + 4] = 0;
 
-	/* Is it already in memory? */
-
 	for (indx = 0, found = 0; indx < MAXPAGES && found == 0; indx++) {
 		if (minlat == dem[indx].min_north
 		    && minlon == dem[indx].min_west
@@ -791,8 +802,6 @@ int LoadSDF_SDF(char *name)
 		    && maxlon == dem[indx].max_west)
 			found = 1;
 	}
-
-	/* Is room available to load it? */
 
 	if (found == 0) {
 		for (indx = 0, free_page = 0; indx < MAXPAGES && free_page == 0;
@@ -804,13 +813,10 @@ int LoadSDF_SDF(char *name)
 	indx--;
 
 	if (free_page && found == 0 && indx >= 0 && indx < MAXPAGES) {
-		/* Search for SDF file in current working directory first */
 
 		strncpy(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
 
 		if( (fd = fopen(path_plus_name, "rb")) == NULL ){
-			/* Next, try loading SDF file from path specified
-			   in $HOME/.ss_path file or by -d argument */
 
 			strncpy(path_plus_name, sdf_path, sizeof(path_plus_name)-1);
 			strncat(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
@@ -846,11 +852,6 @@ int LoadSDF_SDF(char *name)
 				return -errno;
 		}
 
-		/*
-		   Here X lines of DEM will be read until IPPD is reached.
-		   Each .sdf tile contains 1200x1200 = 1.44M 'points'
-		   Each point is sampled for 1200 resolution!
-		 */
 		for (x = 0; x < ippd; x++) {
 			for (y = 0; y < ippd; y++) {
 
@@ -952,28 +953,20 @@ int LoadSDF_SDF(char *name)
 
 char *BZfgets(char *output, BZFILE *bzfd, unsigned length)
 {
-	/* This function returns at most one less than 'length' number
-	   of characters from a bz2 compressed file whose file descriptor
-	   is pointed to by *bzfd.   A NULL string return indicates an
-	   error condition. */
 
 	if (length > BZBUFFER)
 	        return NULL;
 	for (size_t i = 0; (unsigned)i < length; i++) {
-		if (bzbuf_empty) {  // Uncompress data into buffer if empty */
+		if (bzbuf_empty) {
 
 		        bzbytes_read = (long)BZ2_bzRead(&bzerror, bzfd, buffer, BZBUFFER);
 			buffer[bzbytes_read] = 0;
 			bzbuf_empty = 0;
-			/*
-			if (bzbytes_read < BZBUFFER)
-			          if (bzerror == BZ_STREAM_END)   // if we got EOF during last read
-				        BZ2_bzReadGetUnused (&bzerror, bzfd,void** unused, int* nUnused );
-			  */
+
 			if (bzerror != BZ_OK && bzerror != BZ_STREAM_END)
 			        return (NULL);
 		}
-	        if (!bzbuf_empty) {  // Build string from buffer if not empty
+	        if (!bzbuf_empty) {
 		        output[i]=buffer[bzbuf_pointer++];
 
 			if (bzbuf_pointer >= bzbytes_read) {
@@ -994,12 +987,6 @@ char *BZfgets(char *output, BZFILE *bzfd, unsigned length)
 
 int LoadSDF_BZ(char *name)
 {
-	/* This function reads Bzip2 ncompressed ss Data Files (.sdf.bz2)
-	   containing digital elevation model data into memory.
-	   Elevation data, maximum and minimum elevations, and
-	   quadrangle limits are stored in the first available
-	   dem[] structure. 
-	   NOTE: On error, this function returns a negative errno */
 
         int x, y, found, data = 0, indx, minlat, minlon, maxlat, maxlon, j,
 	  success, pos;
@@ -1014,8 +1001,6 @@ int LoadSDF_BZ(char *name)
 
 	sdf_file[x] = 0;
 
-	/* Parse filename for minimum latitude and longitude values */
-
 	if( sscanf(sdf_file, "%d:%d:%d:%d", &minlat, &maxlat, &minlon, &maxlon) != 4 )
 		return -EINVAL;
 
@@ -1029,8 +1014,6 @@ int LoadSDF_BZ(char *name)
 	sdf_file[x+7]='2';
 	sdf_file[x+8]=0;
 
-	/* Is it already in memory? */
-
 	for (indx = 0, found = 0; indx < MAXPAGES && found == 0; indx++) {
 		if (minlat == dem[indx].min_north
 		    && minlon == dem[indx].min_west
@@ -1038,8 +1021,6 @@ int LoadSDF_BZ(char *name)
 		    && maxlon == dem[indx].max_west)
 			found = 1;
 	}
-
-	/* Is room available to load it? */
 
 	if (found == 0) {
 		for (indx = 0, free_page = 0; indx < MAXPAGES && free_page == 0;
@@ -1051,10 +1032,8 @@ int LoadSDF_BZ(char *name)
 	indx--;
 
 	if (free_page && found == 0 && indx >= 0 && indx < MAXPAGES) {
-		/* Search for SDF file in current working directory first */
 
 		strncpy(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
-
 
 		success = 0;
 		fd = fopen(path_plus_name, "rb");
@@ -1062,9 +1041,7 @@ int LoadSDF_BZ(char *name)
 
 		if (fd != NULL && bzerror == BZ_OK)
 		        success = 1;
-		else {	
-		  /* Next, try loading SDF file from path specified
-		     in $HOME/.ss_path file or by -d argument */
+		else {
 
 		        strncpy(path_plus_name, sdf_path, sizeof(path_plus_name)-1);
 			strncat(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
@@ -1087,7 +1064,6 @@ int LoadSDF_BZ(char *name)
 		bzbuf_empty = 1;
 		bzbuf_pointer = bzbytes_read = 0L;
 
-
 		pos = sscanf(BZfgets(bzline, bzfd, 19), "%f", &dem[indx].max_west);
 		if (bzerror != BZ_OK || pos == EOF)
 		        return -errno;
@@ -1104,11 +1080,6 @@ int LoadSDF_BZ(char *name)
 		if (bzerror != BZ_OK || pos == EOF)
 		        return -errno;
 
-		/*
-		   Here X lines of DEM will be read until IPPD is reached.
-		   Each .sdf tile contains 1200x1200 = 1.44M 'points'
-		   Each point is sampled for 1200 resolution!
-		 */
 		posn = NULL;
 		for (x = 0; x < ippd; x++) {
 			for (y = 0; y < ippd; y++) {
@@ -1218,19 +1189,14 @@ int LoadSDF_BZ(char *name)
 
 char *GZfgets(char *output, gzFile gzfd, unsigned length)
 {
-	/* This function returns at most one less than 'length' number
-	   of characters from a Gzip compressed file whose file descriptor
-	   is pointed to by gzfd.   A NULL string return indicates an
-	   error condition. */
 
 	const char *errmsg;
-  
+
 	if (length > GZBUFFER-2)
 	        return NULL;
 
-
 	for (size_t i = 0; (unsigned)i < length; i++) {
-		if (gzbuf_empty) {  // Uncompress data into buffer if empty */
+		if (gzbuf_empty) {
 
 		        gzbytes_read = (long)gzread(gzfd, buffer, (unsigned) GZBUFFER-2);
 			errmsg = gzerror(gzfd, &gzerr);
@@ -1248,7 +1214,7 @@ char *GZfgets(char *output, gzFile gzfd, unsigned length)
 				        return (NULL);
 			}
 		}
-	        if (!gzbuf_empty) {  // Build string from buffer if not empty
+	        if (!gzbuf_empty) {
 		        output[i]=buffer[gzbuf_pointer++];
 
 			if (gzbuf_pointer >= gzbytes_read) {
@@ -1272,15 +1238,8 @@ char *GZfgets(char *output, gzFile gzfd, unsigned length)
 	return (output);
 }
 
-
 int LoadSDF_GZ(char *name)
 {
-	/* This function reads Gzip compressed ss Data Files (.sdf.gz)
-	   containing digital elevation model data into memory.
-	   Elevation data, maximum and minimum elevations, and
-	   quadrangle limits are stored in the first available
-	   dem[] structure. 
-	   NOTE: On error, this function returns a negative errno */
 
         int x, y, found, data = 0, indx, minlat, minlon, maxlat, maxlon, j,
 	  success, pos;
@@ -1290,13 +1249,10 @@ int LoadSDF_GZ(char *name)
 
 	gzFile gzfd;
 
-
 	for (x = 0; name[x] != '.' && name[x] != 0 && x < 247; x++)
 		sdf_file[x] = name[x];
 
 	sdf_file[x] = 0;
-
-	/* Parse filename for minimum latitude and longitude values */
 
 	if( sscanf(sdf_file, "%d:%d:%d:%d", &minlat, &maxlat, &minlon, &maxlon) != 4 )
 		return -EINVAL;
@@ -1310,8 +1266,6 @@ int LoadSDF_GZ(char *name)
 	sdf_file[x+6]='z';
 	sdf_file[x+7]=0;
 
-	/* Is it already in memory? */
-
 	for (indx = 0, found = 0; indx < MAXPAGES && found == 0; indx++) {
 		if (minlat == dem[indx].min_north
 		    && minlon == dem[indx].min_west
@@ -1319,8 +1273,6 @@ int LoadSDF_GZ(char *name)
 		    && maxlon == dem[indx].max_west)
 			found = 1;
 	}
-
-	/* Is room available to load it? */
 
 	if (found == 0) {
 		for (indx = 0, free_page = 0; indx < MAXPAGES && free_page == 0;
@@ -1332,19 +1284,15 @@ int LoadSDF_GZ(char *name)
 	indx--;
 
 	if (free_page && found == 0 && indx >= 0 && indx < MAXPAGES) {
-		/* Search for SDF file in current working directory first */
 
 		strncpy(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
-
 
 		success = 0;
 		gzfd = gzopen(path_plus_name, "rb");
 
 		if (gzfd != NULL)
 		        success = 1;
-		else {	
-		  /* Next, try loading SDF file from path specified
-		     in $HOME/.ss_path file or by -d argument */
+		else {
 
 		        strncpy(path_plus_name, sdf_path, sizeof(path_plus_name)-1);
 			strncat(path_plus_name, sdf_file, sizeof(path_plus_name)-1);
@@ -1356,7 +1304,7 @@ int LoadSDF_GZ(char *name)
 		if (!success)
 		        return -errno;
 
-		if (gzbuffer(gzfd, GZBUFFER))  // Allocate 32K buffer
+		if (gzbuffer(gzfd, GZBUFFER))
 		        return -EIO;
 
 		if (debug == 1) {
@@ -1395,11 +1343,6 @@ int LoadSDF_GZ(char *name)
 			fflush(stderr);
 		}
 
-		/*
-		   Here X lines of DEM will be read until IPPD is reached.
-		   Each .sdf tile contains 1200x1200 = 1.44M 'points'
-		   Each point is sampled for 1200 resolution!
-		 */
 		posn = NULL;
 		for (x = 0; x < ippd; x++) {
 			for (y = 0; y < ippd; y++) {
@@ -1456,7 +1399,7 @@ int LoadSDF_GZ(char *name)
 			}
 		}
 
-		gzclose_r(gzfd);  // close for reading (avoids write code)
+		gzclose_r(gzfd);
 
 		if (dem[indx].min_el < min_elevation)
 			min_elevation = dem[indx].min_el;
@@ -1513,46 +1456,25 @@ int LoadSDF_GZ(char *name)
 		return 0;
 }
 
-
 int LoadSDF(char *name)
 {
-	/* This function loads the requested SDF file from the filesystem.
-	   It first tries to invoke the LoadSDF_SDF() function to load an
-	   uncompressed SDF file (since uncompressed files load slightly
-	   faster).  If that attempt fails, then it tries to load a
-	   compressed SDF file by invoking the LoadSDF_BZ() function.
-	   If that attempt fails, then it tries again to load a
-	   compressed SDF file by invoking the LoadSDF_GZ() function.
-	   If that fails, then we can assume that no elevation data
-	   exists for the region requested, and that the region
-	   requested must be entirely over water. */
 
 	int x, y, indx, minlat, minlon, maxlat, maxlon;
 	char found, free_page = 0;
 	int return_value = -1;
 
-	/* Try to load an uncompressed SDF first. */
-
 	return_value = LoadSDF_SDF(name);
-
-	/* If that fails, try loading a BZ2 compressed SDF. */
 
 	if ( return_value <= 0 )
 	        return_value = LoadSDF_BZ(name);
 
-	/* If that fails, try loading a gzip compressed SDF. */
-
 	if ( return_value <= 0 )
 	        return_value = LoadSDF_GZ(name);
-
-	/* If no file format can be found, then assume the area is water. */
 
 	if ( return_value <= 0 ) {
 
 		sscanf(name, "%d:%d:%d:%d", &minlat, &maxlat, &minlon,
 		       &maxlon);
-
-		/* Is it already in memory? */
 
 		for (indx = 0, found = 0; indx < MAXPAGES && found == 0; indx++) {
 			if (minlat == dem[indx].min_north
@@ -1561,8 +1483,6 @@ int LoadSDF(char *name)
 			    && maxlon == dem[indx].max_west)
 				found = 1;
 		}
-
-		/* Is room available to load it? */
 
 		if (found == 0) {
 			for (indx = 0, free_page = 0;
@@ -1585,8 +1505,6 @@ int LoadSDF(char *name)
 			dem[indx].min_north = minlat;
 			dem[indx].min_west = minlon;
 			dem[indx].max_north = maxlat;
-
-			/* Fill DEM with sea-level topography */
 
 			for (x = 0; x < ippd; x++)
 				for (y = 0; y < ippd; y++) {
@@ -1655,9 +1573,6 @@ int LoadSDF(char *name)
 
 int LoadPAT(char *az_filename, char *el_filename)
 {
-	/* This function reads and processes antenna pattern (.az
-	   and .el) files that may correspond in name to previously
-	   loaded ss .lrp files or may be user-supplied by cmdline.  */
 
 	int a, b, w, x, y, z, last_index, next_index, span;
 	char string[255], *pointer = NULL;
@@ -1673,10 +1588,8 @@ int LoadPAT(char *az_filename, char *el_filename)
 	got_azimuth_pattern = 0;
 	got_elevation_pattern = 0;
 
-	/* Load .az antenna pattern file */
-
 	if( az_filename != NULL && (fd = fopen(az_filename, "r")) == NULL && errno != ENOENT )
-		/* Any error other than file not existing is an error */
+
 		return errno;
 
 	if( fd != NULL ){
@@ -1686,41 +1599,31 @@ int LoadPAT(char *az_filename, char *el_filename)
 			fflush(stderr);
 		}
 
-		/* Clear azimuth pattern array */
 		for (x = 0; x <= 360; x++) {
 			azimuth[x] = 0.0;
 			read_count[x] = 0;
 		}
 
-		/* Read azimuth pattern rotation
-		   in degrees measured clockwise
-		   from true North. */
-
 		if (fgets(string, 254, fd) == NULL) {
-			//fprintf(stderr,"Azimuth read error\n");
-			//exit(0);
+
 		}
 		pointer = strchr(string, ';');
 
 		if (pointer != NULL)
 			*pointer = 0;
 
-		if (antenna_rotation != -1)  // If cmdline override
+		if (antenna_rotation != -1)
 		  rotation = (float)antenna_rotation;
 		else
 		        sscanf(string, "%f", &rotation);
-		
+
 	        if (debug) {
 		        fprintf(stderr, "Antenna Pattern Rotation = %f\n", rotation);
 			fflush(stderr);
 		}
-		/* Read azimuth (degrees) and corresponding
-		   normalized field radiation pattern amplitude
-		   (0.0 to 1.0) until EOF is reached. */
 
 		if (fgets(string, 254, fd) == NULL) {
-			//fprintf(stderr,"Azimuth read error\n");
-			//exit(0);
+
 		}
 		pointer = strchr(string, ';');
 
@@ -1738,8 +1641,7 @@ int LoadPAT(char *az_filename, char *el_filename)
 			}
 
 			if (fgets(string, 254, fd) == NULL) {
-				//fprintf(stderr,"Azimuth read error\n");
-				// exit(0);
+
 			}
 			pointer = strchr(string, ';');
 
@@ -1753,8 +1655,6 @@ int LoadPAT(char *az_filename, char *el_filename)
 		fclose(fd);
 		fd = NULL;
 
-		/* Handle 0=360 degree ambiguity */
-
 		if ((read_count[0] == 0) && (read_count[360] != 0)) {
 			read_count[0] = read_count[360];
 			azimuth[0] = azimuth[360];
@@ -1765,16 +1665,10 @@ int LoadPAT(char *az_filename, char *el_filename)
 			azimuth[360] = azimuth[0];
 		}
 
-		/* Average pattern values in case more than
-		   one was read for each degree of azimuth. */
-
 		for (x = 0; x <= 360; x++) {
 			if (read_count[x] > 1)
 				azimuth[x] /= (float)read_count[x];
 		}
-
-		/* Interpolate missing azimuths
-		   to completely fill the array */
 
 		last_index = -1;
 		next_index = -1;
@@ -1802,10 +1696,6 @@ int LoadPAT(char *az_filename, char *el_filename)
 			}
 		}
 
-		/* Perform azimuth pattern rotation
-		   and load azimuth_pattern[361] with
-		   azimuth pattern data in its final form. */
-
 		for (x = 0; x < 360; x++) {
 			y = x + (int)rintf(rotation);
 
@@ -1820,10 +1710,8 @@ int LoadPAT(char *az_filename, char *el_filename)
 		got_azimuth_pattern = 255;
 	}
 
-	/* Read and process .el file */
-
 	if( el_filename != NULL && (fd = fopen(el_filename, "r")) == NULL && errno != ENOENT )
-		/* Any error other than file not existing is an error */
+
 		return errno;
 
 	if( fd != NULL ){
@@ -1832,20 +1720,13 @@ int LoadPAT(char *az_filename, char *el_filename)
 			fflush(stderr);
 		}
 
-		/* Clear azimuth pattern array */
-
 		for (x = 0; x <= 10000; x++) {
 			el_pattern[x] = 0.0;
 			read_count[x] = 0;
 		}
 
-		/* Read mechanical tilt (degrees) and
-		   tilt azimuth in degrees measured
-		   clockwise from true North. */
-
 		if (fgets(string, 254, fd) == NULL) {
-			//fprintf(stderr,"Tilt read error\n");
-			//exit(0);
+
 		}
 		pointer = strchr(string, ';');
 
@@ -1854,28 +1735,23 @@ int LoadPAT(char *az_filename, char *el_filename)
 
 		sscanf(string, "%f %f", &mechanical_tilt, &tilt_azimuth);
 
-		if (antenna_downtilt != 99.0) {  // If Cmdline override
-		        if (antenna_dt_direction == -1) // dt_dir not specified
-			        tilt_azimuth = rotation;  // use rotation value
+		if (antenna_downtilt != 99.0) {
+		        if (antenna_dt_direction == -1)
+			        tilt_azimuth = rotation;
 		        mechanical_tilt = (float)antenna_downtilt;
 		}
 
-		if (antenna_dt_direction != -1) // If Cmdline override
+		if (antenna_dt_direction != -1)
 		        tilt_azimuth = (float)antenna_dt_direction;
-		
+
 	        if (debug) {
 		        fprintf(stderr, "Antenna Pattern Mechamical Downtilt = %f\n", mechanical_tilt);
 		        fprintf(stderr, "Antenna Pattern Mechanical Downtilt Direction = %f\n\n", tilt_azimuth);
 			fflush(stderr);
 		}
 
-		/* Read elevation (degrees) and corresponding
-		   normalized field radiation pattern amplitude
-		   (0.0 to 1.0) until EOF is reached. */
-
 		if (fgets(string, 254, fd) == NULL) {
-			//fprintf(stderr,"Ant elevation read error\n");
-			//exit(0);
+
 		}
 		pointer = strchr(string, ';');
 
@@ -1885,9 +1761,6 @@ int LoadPAT(char *az_filename, char *el_filename)
 		sscanf(string, "%f %f", &elevation, &amplitude);
 
 		while (feof(fd) == 0) {
-			/* Read in normalized radiated field values
-			   for every 0.01 degrees of elevation between
-			   -10.0 and +90.0 degrees */
 
 			x = (int)rintf(100.0 * (elevation + 10.0));
 
@@ -1907,18 +1780,10 @@ int LoadPAT(char *az_filename, char *el_filename)
 
 		fclose(fd);
 
-		/* Average the field values in case more than
-		   one was read for each 0.01 degrees of elevation. */
-
 		for (x = 0; x <= 10000; x++) {
 			if (read_count[x] > 1)
 				el_pattern[x] /= (float)read_count[x];
 		}
-
-		/* Interpolate between missing elevations (if
-		   any) to completely fill the array and provide
-		   radiated field values for every 0.01 degrees of
-		   elevation. */
 
 		last_index = -1;
 		next_index = -1;
@@ -1946,10 +1811,6 @@ int LoadPAT(char *az_filename, char *el_filename)
 				next_index = -1;
 			}
 		}
-
-		/* Fill slant_angle[] array with offset angles based
-		   on the antenna's mechanical beam tilt (if any)
-		   and tilt direction (azimuth). */
 
 		if (mechanical_tilt == 0.0) {
 			for (x = 0; x <= 360; x++)
@@ -1979,20 +1840,12 @@ int LoadPAT(char *az_filename, char *el_filename)
 			}
 		}
 
-		slant_angle[360] = slant_angle[0];	/* 360 degree wrap-around */
+		slant_angle[360] = slant_angle[0];
 
 		for (w = 0; w <= 360; w++) {
 			tilt = slant_angle[w];
 
-	    /** Convert tilt angle to
-	            an array index offset **/
-
 			y = (int)rintf(100.0 * tilt);
-
-			/* Copy shifted el_pattern[10001] field
-			   values into elevation_pattern[361][1001]
-			   at the corresponding azimuth, downsampling
-			   (averaging) along the way in chunks of 10. */
 
 			for (x = y, z = 0; z <= 1000; x += 10, z++) {
 				for (sum = 0.0, a = 0; a < 10; a++) {
@@ -2049,8 +1902,6 @@ int LoadSignalColors(struct site xmtr)
 	filename[x + 2] = 'c';
 	filename[x + 3] = 'f';
 	filename[x + 4] = 0;
-
-	/* Default values */
 
 	region.level[0] = 128;
 	region.color[0][0] = 255;
@@ -2119,7 +1970,6 @@ int LoadSignalColors(struct site xmtr)
 
 	region.levels = 13;
 
-	/* Don't save if we don't have an output file */
 	if ( (fd = fopen(filename, "r")) == NULL && xmtr.filename[0] == '\0' )
 		return 0;
 
@@ -2199,8 +2049,6 @@ int LoadLossColors(struct site xmtr)
 	filename[x + 2] = 'c';
 	filename[x + 3] = 'f';
 	filename[x + 4] = 0;
-
-	/* Default values */
 
 	region.level[0] = 80;
 	region.color[0][0] = 255;
@@ -2283,16 +2131,7 @@ int LoadLossColors(struct site xmtr)
 	region.color[15][2] = 204;
 
 	region.levels = 16;
-/*	region.levels = 120; // 240dB max PL */
 
-/*	for(int i=0; i<region.levels;i++){
-		region.level[i] = i*2;
-		region.color[i][0] = i*2;
-		region.color[i][1] = i*2;
-		region.color[i][2] = i*2;
-	}
-*/
-	/* Don't save if we don't have an output file */
 	if ( (fd = fopen(filename, "r")) == NULL && xmtr.filename[0] == '\0' )
 		return 0;
 
@@ -2379,8 +2218,6 @@ int LoadDBMColors(struct site xmtr)
 	filename[x + 3] = 'f';
 	filename[x + 4] = 0;
 
-	/* Default values */
-
 	region.level[0] = 0;
 	region.color[0][0] = 255;
 	region.color[0][1] = 0;
@@ -2463,7 +2300,6 @@ int LoadDBMColors(struct site xmtr)
 
 	region.levels = 16;
 
-	/* Don't save if we don't have an output file */
 	if ( (fd = fopen(filename, "r")) == NULL && xmtr.filename[0] == '\0' )
 		return 0;
 
@@ -2534,8 +2370,6 @@ int LoadDBMColors(struct site xmtr)
 
 int LoadTopoData(double max_lon, double min_lon, double max_lat, double min_lat)
 {
-	/* This function loads the SDF files required
-	   to cover the limits of the region specified. */
 
 	int x, y, width, ymin, ymax;
 	int success;
@@ -2564,7 +2398,6 @@ int LoadTopoData(double max_lon, double min_lon, double max_lat, double min_lat)
 
 				snprintf(basename, 255, "%d:%d:%d:%d", x, x + 1, ymin, ymax);
 				strcpy(string, basename);
-
 
 				if (ippd == 3600)
 				        strcat(string, "-hd");
@@ -2645,7 +2478,6 @@ int LoadUDT(char *filename)
 		*pointer = 0;
 
 	while (feof(fd1) == 0) {
-	  // Parse line for latitude, longitude, height
 
 		for (x = 0, y = 0, z = 0;
 		     x < 78 && input[x] != 0 && z < 3; x++) {
@@ -2664,23 +2496,14 @@ int LoadUDT(char *filename)
 		old_latitude = latitude = ReadBearing(str[0]);
 		old_longitude = longitude = ReadBearing(str[1]);
 
-		latitude = fabs(latitude);  // Clip if negative
+		latitude = fabs(latitude);
 		longitude = fabs(longitude);
-
-		// Remove <CR> and/or <LF> from antenna height string
 
 		for (i = 0;
 		     str[2][i] != 13 && str[2][i] != 10
 		     && str[2][i] != 0; i++) ;
 
 		str[2][i] = 0;
-
-		/* The terrain feature may be expressed in either
-		   feet or meters.  If the letter 'M' or 'm' is
-		   discovered in the string, then this is an
-		   indication that the value given is expressed
-		   in meters.  Otherwise the height is interpreted
-		   as being expressed in feet.  */
 
 		for (i = 0;
 		     str[2][i] != 'M' && str[2][i] != 'm'
@@ -2737,7 +2560,7 @@ int LoadUDT(char *filename)
 		do {
 			if (x > y && xpix == tempxpix
 			    && ypix == tempypix) {
-			        z = 1;	// Dupe Found!
+			        z = 1;
 
 				if (tempheight > height)
 					height = tempheight;
@@ -2753,7 +2576,7 @@ int LoadUDT(char *filename)
 		} while (feof(fd2) == 0 && z == 0);
 
 		if (z == 0) {
-			// No duplicate found
+
 		        if (debug) {
 			        fprintf(stderr,"Adding UDT Point: %lf, %lf, %lf\n", old_latitude, old_longitude,height);
 				fflush(stderr);

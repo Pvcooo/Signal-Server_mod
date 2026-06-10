@@ -19,8 +19,6 @@
 
 #include <math.h>
 
-// use call with log/ln as this may be faster
-// use constant of value 20.0/log(10.0)
 static __inline float _20log10f(float x)
 {
   return(8.685889f*logf(x));

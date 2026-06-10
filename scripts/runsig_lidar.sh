@@ -3,32 +3,33 @@
 #
 # Area coverage:
 #   ./runsig_lidar.sh -lat LAT -lon LON -txh H -f FREQ -erp ERP -R RADIUS \
-#       [-txn "Nombre TX"] [-rxn "Nombre RX"] [-resample N] -o /ruta/salida
+#       [-txn "TX Name"] [-rxn "RX Name"] [-resample N] -o /path/output
 #
 # Point-to-point:
 #   ./runsig_lidar.sh -lat LAT -lon LON -txh H \
 #       -rla RXLAT -rlo RXLON [-rxh H] \
-#       -f FREQ -erp ERP -o /ruta/salida \
-#       [-txn "Nombre TX"] [-rxn "Nombre RX"] \
-#       [-coverage -R RADIO_km]   # también calcula cobertura y la añade al KMZ como "Plot"
+#       -f FREQ -erp ERP -o /path/output \
+#       [-txn "TX Name"] [-rxn "RX Name"] \
+#       [-coverage -R RADIUS_km]   # also computes coverage and adds it to the KMZ as "Plot"
 #
 # Requires: imagemagick  (sudo apt install imagemagick)
 #           zip          (sudo apt install zip)
 #           gnuplot      (sudo apt install gnuplot)   [P2P only]
 
-# --- Fix CRLF si el script se guardó en Windows ---
+# --- Fix CRLF line endings if the script was saved on Windows ---
 case "$(head -1 "$0" | cat -A)" in *'^M'*) sed -i 's/\r//' "$0"; exec bash "$0" "$@";; esac
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
-BINARY="${SCRIPTDIR}/src/signalserverLIDAR"
-DTM_DIR="${SCRIPTDIR}/utils/DTM_models"
+ROOT="$(cd "$SCRIPTDIR/.." && pwd)"
+BINARY="${ROOT}/src/signalserverLIDAR"
+DTM_DIR="${ROOT}/data/dtm"
 
 if [[ $# -eq 0 ]]; then
-    echo "Uso: $0 [opciones] -o RUTA_SALIDA"
+    echo "Usage: $0 [options] -o OUTPUT_PATH"
     exit 1
 fi
 
-# ---------- Parsear argumentos ----------
+# ---------- Parse arguments ----------
 OUTPATH="" TX_LAT="" TX_LON="" TX_H="" RX_LAT="" RX_LON="" RX_H=""
 PPA=0 METRIC=0 COVERAGE=0 TX_NAME="" RX_NAME="" RADIUS=""
 COV_RESAMPLE="" COV_PM=""
@@ -55,37 +56,41 @@ for i in "${!args[@]}"; do
 done
 
 if [[ -z "$OUTPATH" ]]; then
-    echo "Error: -o RUTA_SALIDA es obligatorio" >&2; exit 1
+    echo "Error: -o OUTPUT_PATH is required" >&2; exit 1
 fi
 
-# Crear subcarpeta con el nombre del output: .../BASENAME/BASENAME.*
+# Create a subfolder named after the output: .../BASENAME/BASENAME.*
 _BASE_PARENT="$(dirname "$OUTPATH")"
 BASENAME="$(basename "$OUTPATH")"
 OUTDIR="${_BASE_PARENT}/${BASENAME}"
 OUTPATH="${OUTDIR}/${BASENAME}"
 mkdir -p "$OUTDIR"
+# Make paths absolute so steps that run from a temp dir (the KMZ zip) work
+# even when -o / OUTBASE is a relative path.
+OUTDIR="$(cd "$OUTDIR" && pwd)"
+OUTPATH="${OUTDIR}/${BASENAME}"
 
-# ---------- Construir listas de argumentos para el binario ----------
-# BINARY_ARGS: args para el run P2P/cobertura.
-#   Excluye: -coverage, -txn, -rxn (solo script), -R (se gestiona abajo)
+# ---------- Build argument lists for the binary ----------
+# BINARY_ARGS: args for the P2P/coverage run.
+#   Excludes: -coverage, -txn, -rxn (script-only), -R (handled below)
 BINARY_ARGS=()
 skip_next=0
 for i in "${!args[@]}"; do
     if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
     case "${args[$i]}" in
-        -coverage)              ;;                    # solo script, sin valor
-        -txn|-rxn|-R)           skip_next=1 ;;        # solo script / se añade abajo
-        -covresample|-covpm)    skip_next=1 ;;        # solo script
+        -coverage)              ;;                    # script-only, no value
+        -txn|-rxn|-R)           skip_next=1 ;;        # script-only / added below
+        -covresample|-covpm)    skip_next=1 ;;        # script-only
         -o)          BINARY_ARGS+=("${args[$i]}" "$OUTPATH"); skip_next=1 ;;
         *)           BINARY_ARGS+=("${args[$i]}") ;;
     esac
 done
 
-# -R para BINARY_ARGS (run P2P o cobertura directa):
-#   · Si el usuario pasó -R: usar ese valor.
-#   · Si es P2P sin -R: calcular distancia TX→RX + 1 km de margen para que
-#     el binario cargue todos los tiles del trayecto (Signal Server usa -R
-#     para determinar el área de carga de tiles incluso en modo P2P).
+# -R for BINARY_ARGS (P2P run or direct coverage):
+#   - If the user passed -R: use that value.
+#   - If P2P without -R: compute TX->RX distance + 1 km margin so that
+#     the binary loads every tile along the path (Signal Server uses -R
+#     to determine the tile-loading area even in P2P mode).
 if [[ -n "$RADIUS" ]]; then
     BINARY_ARGS+=("-R" "$RADIUS")
 elif [[ $PPA -eq 1 && -n "$TX_LAT" && -n "$TX_LON" && -n "$RX_LAT" && -n "$RX_LON" ]]; then
@@ -99,7 +104,7 @@ print(round(6371*2*math.asin(math.sqrt(a))+1, 1))
     BINARY_ARGS+=("-R" "$_AUTO_R")
 fi
 
-# COV_ARGS: run de cobertura — elimina flags P2P, sustituye -R por el del usuario.
+# COV_ARGS: coverage run — removes P2P flags, replaces -R with the user value.
 COV_ARGS=()
 skip_next=0
 for i in "${!BINARY_ARGS[@]}"; do
@@ -111,36 +116,37 @@ for i in "${!BINARY_ARGS[@]}"; do
 done
 [[ -n "$RADIUS" ]] && COV_ARGS+=("-R" "$RADIUS")
 
-# Resample para cobertura: si el usuario pasó -covresample úsalo;
-# si no, aplica 5 por defecto (25m efectivo en MDT de 5m → 25× más rápido).
-# Pasar -covresample 1 desactiva el resample.
+# Coverage resample: if the user passed -covresample use it;
+# otherwise default to 5 (25 m effective on a 5 m DTM -> 25x faster).
+# Passing -covresample 1 disables resampling.
 _COV_RESAMPLE="${COV_RESAMPLE:-5}"
 [[ "$_COV_RESAMPLE" -gt 1 ]] 2>/dev/null && COV_ARGS+=("-resample" "$_COV_RESAMPLE")
 
-# Modelo de propagación para cobertura (opcional, independiente del P2P):
-# -covpm 1=ITM (preciso, lento), 3=Hata, 6=COST-Hata, 7=FSPL (rápido).
+# Propagation model for coverage (optional, independent of P2P):
+# -covpm 1=ITM (accurate, slow), 3=Hata, 6=COST-Hata, 7=FSPL (fast).
 [[ -n "$COV_PM" ]] && COV_ARGS+=("-pm" "$COV_PM")
 
-# ---------- Filtro de mensajes ruidosos del binario ----------
-# Suprime líneas de carga/reproyección/depuración internas; conserva errores y warnings.
+# ---------- Filter noisy messages from the binary ----------
+# Suppresses internal load/reprojection/debug lines; keeps errors and warnings.
 _filter_log() {
     grep -v -E \
         '^(Loading |Reprojecting |Loaded GDAL |res |mw:|Mnw:|totalh:|north_pixel|mn:|Offset |Height:|Setting IPPD|LIDAR LOADED|fc |ppd |field strength|Finished PlotProp|Cropping )'
 }
 
-# ---------- Comprobar dependencias ANTES de ejecutar ----------
+# ---------- Check dependencies BEFORE running ----------
 for dep in convert zip; do
     if ! command -v "$dep" &>/dev/null; then
-        echo "ERROR: '$dep' no encontrado. Instala con: sudo apt install ${dep/convert/imagemagick}" >&2
+        echo "ERROR: '$dep' not found. Install with: sudo apt install ${dep/convert/imagemagick}" >&2
         exit 1
     fi
 done
 if [[ $PPA -eq 1 ]] && ! command -v gnuplot &>/dev/null; then
-    echo "ERROR: 'gnuplot' no encontrado. Instala con: sudo apt install gnuplot" >&2
-    exit 1
+    # gnuplot is only needed for the profile chart; do NOT abort the whole run.
+    echo "WARNING: 'gnuplot' not found; the profile chart will be skipped." >&2
+    echo "         Install it with: sudo apt install gnuplot" >&2
 fi
 
-# ---------- Generar .dcf (color definitions para mapas dBm) ----------
+# ---------- Generate .dcf (color definitions for dBm maps) ----------
 generate_dcf() {
     cat > "$1" << 'DCFEOF'
        +0: 255,   0,   0
@@ -162,33 +168,61 @@ generate_dcf() {
 DCFEOF
 }
 
+# ---------- Generate a legend PNG (colour -> dBm) from a .dcf palette ----------
+generate_legend() {
+    # $1 = .dcf palette file, $2 = output PNG. Needs ImageMagick (convert).
+    local dcf="$1" out="$2"
+    command -v convert >/dev/null 2>&1 || return 1
+    [[ -f "$dcf" ]] || return 1
+    local rowh=18 sw=24 x0=8 y=28 n=0 line val rgb r g b
+    # Draw INLINE (no '-draw @file': some ImageMagick policies block indirect
+    # MVG reads, which would leave the legend blank).
+    local draw="fill black stroke none font-size 13 text 8,18 'Signal level (dBm)'"
+    while IFS= read -r line; do
+        val="$(printf '%s' "$line" | sed -nE 's/^[[:space:]]*([+-]?[0-9]+)[[:space:]]*:.*/\1/p')"
+        [[ -n "$val" ]] || continue
+        rgb="$(printf '%s' "$line" | sed -E 's/^[^:]*:[[:space:]]*//')"
+        r="$(printf '%s' "$rgb" | cut -d, -f1 | tr -dc '0-9')"
+        g="$(printf '%s' "$rgb" | cut -d, -f2 | tr -dc '0-9')"
+        b="$(printf '%s' "$rgb" | cut -d, -f3 | tr -dc '0-9')"
+        [[ -n "$r" && -n "$g" && -n "$b" ]] || continue
+        draw+=" fill rgb($r,$g,$b) stroke black stroke-width 0.6 rectangle $x0,$y $((x0+sw)),$((y+rowh-4))"
+        draw+=" fill black stroke none text $((x0+sw+6)),$((y+rowh-7)) '$val'"
+        y=$((y+rowh)); n=$((n+1))
+    done < "$dcf"
+    [[ $n -gt 0 ]] || return 1
+    local W=142 H=$((y+6))
+    # Opaque, 8-bit PNG so Google Earth accepts it as an overlay.
+    convert -size "${W}x${H}" xc:white -fill none -stroke black -strokewidth 1 -draw "rectangle 0,0 $((W-1)),$((H-1))" -draw "$draw" -alpha off -depth 8 "$out" 2>/dev/null
+}
+
 # ============================================================
-# MODO PUNTO A PUNTO
+# POINT-TO-POINT MODE
 # ============================================================
 if [[ $PPA -eq 1 ]]; then
 
-    # -------- Ejecutar análisis P2P --------
+    # -------- Run P2P analysis --------
     TMPLOG="$(mktemp)"
     { time "$BINARY" -lid "$DTM_DIR" "${BINARY_ARGS[@]}"; } 2>"$TMPLOG"
     _filter_log < "$TMPLOG" >&2
     rm -f "$TMPLOG"
-    # El auto-radio puede generar un .ppm como efecto secundario; eliminarlo
-    # cuando no se ha solicitado cobertura explícita.
+    # The auto-radius may produce a .ppm as a side effect; remove it
+    # when explicit coverage was not requested.
     [[ $COVERAGE -eq 0 ]] && rm -f "${OUTPATH}.ppm"
 
     TXT="${OUTPATH}.txt"
     if [[ ! -f "$TXT" ]]; then
-        echo "ERROR: no se encontró el informe: $TXT" >&2; exit 1
+        echo "ERROR: report not found: $TXT" >&2; exit 1
     fi
 
-    # Generar .dcf siempre como archivo de salida
+    # Always generate .dcf as an output file
     generate_dcf "${OUTPATH}.dcf"
 
-    # -------- Ejecutar cobertura adicional (flag -coverage) --------
+    # -------- Run additional coverage (-coverage flag) --------
     COV_PNG="" BBOX_NORTH="" BBOX_EAST="" BBOX_SOUTH="" BBOX_WEST=""
     if [[ $COVERAGE -eq 1 ]]; then
         if [[ -z "$RADIUS" ]]; then
-            echo "ERROR: -coverage requiere también -R RADIO_km" >&2; exit 1
+            echo "ERROR: -coverage also requires -R RADIUS_km" >&2; exit 1
         fi
         TMPLOG_COV="$(mktemp)"
         { time "$BINARY" -lid "$DTM_DIR" "${COV_ARGS[@]}" -dbg; } 2>"$TMPLOG_COV"
@@ -207,12 +241,19 @@ if [[ $PPA -eq 1 ]]; then
                 BBOX_WEST="${PARTS[4]}"
             fi
         else
-            echo "AVISO: -coverage activo pero no se generó PPM. ¿Falta -R o falla el binario?" >&2
+            echo "WARNING: -coverage active but no PPM produced. Missing -R or binary failure?" >&2
         fi
         rm -f "$TMPLOG_COV"
     fi
 
-    # -------- Parsear .txt --------
+    # Legend (colour -> dBm) for the coverage overlay, if any.
+    LEGEND_PNG=""
+    if [[ -n "$COV_PNG" && -f "$COV_PNG" ]]; then
+        LEGEND_PNG="${OUTPATH}_legend.png"
+        generate_legend "${OUTPATH}.dcf" "$LEGEND_PNG" || LEGEND_PNG=""
+    fi
+
+    # -------- Parse .txt --------
     units="true"
     [[ $METRIC -eq 0 ]] && units="false"
 
@@ -252,7 +293,7 @@ if [[ $PPA -eq 1 ]]; then
     RX_LAT_TXT=$(echo "$RX_LOC" | cut -d',' -f1 | tr -d ' ')
     RX_LON_TXT=$(echo "$RX_LOC" | cut -d',' -f2 | tr -d ' ')
 
-    # Aplicar nombres personalizados si se proporcionaron
+    # Apply custom names if provided
     [[ -n "$TX_NAME" ]] && TX_SITE="$TX_NAME"
     [[ -n "$RX_NAME" ]] && RX_SITE="$RX_NAME"
 
@@ -306,7 +347,13 @@ if [[ $PPA -eq 1 ]]; then
         OBS_JSON+="]"
     fi
 
-    # -------- Generar JSON --------
+    # JSON-valid numbers: leading zero on fractions (bc drops it) and no
+    # leading '+' on angles/attenuation (invalid JSON).
+    FSIT_J=$(awk "BEGIN{printf \"%.4f\", (${FSIT:-50})/100}")
+    FTIM_J=$(awk "BEGIN{printf \"%.4f\", (${FTIM:-90})/100}")
+    TX_TILT="${TX_TILT#+}"; RX_TILT="${RX_TILT#+}"; SHIELD="${SHIELD#+}"
+
+    # -------- Generate JSON --------
     cat > "${OUTPATH}.json" <<JSON_EOF
 {
     "_link": {
@@ -329,8 +376,8 @@ if [[ $PPA -eq 1 ]]; then
         "_atmospheric_bending": ${ATMO:-0},
         "_dielectric_constant": ${DIELEC:-0},
         "_earth_conductivity": ${CONDUCT:-0},
-        "_fraction_of_situation": $(echo "scale=4; ${FSIT:-50}/100" | bc),
-        "_fraction_of_time": $(echo "scale=4; ${FTIM:-90}/100" | bc),
+        "_fraction_of_situation": ${FSIT_J:-0.5},
+        "_fraction_of_time": ${FTIM_J:-0.9},
         "_frequency": ${FREQ:-0},
         "_model": "${PROP_MODEL}",
         "_polarization": "${POLAR}",
@@ -367,7 +414,7 @@ if [[ $PPA -eq 1 ]]; then
 }
 JSON_EOF
 
-    # -------- Gráfico de perfil (gnuplot) --------
+    # -------- Profile chart (gnuplot) --------
     PROFILE_PNG="${OUTPATH}_profile.png"
     GP_TERRAIN="${OUTPATH}_terrain_abs"
     GP_LOS="${OUTPATH}_los_abs"
@@ -377,7 +424,10 @@ JSON_EOF
     if [[ -f "$GP_TERRAIN" && -f "$GP_LOS" ]]; then
         GPLOT_SCRIPT="$(mktemp --suffix=.gp)"
 
-        PLOT_CMD="\"${GP_TERRAIN}\" using 1:2 with filledcurves y1=0 title 'Terrain Profile' lc rgb '#A0826D' fs solid 0.7"
+        # Y-axis baseline: 100 m below the lowest terrain point on the path.
+        YMIN=$(awk 'NF>=2 && $2 ~ /^-?[0-9.]+$/ { if (m=="" || $2<m) m=$2 } END { if (m=="") m=0; printf "%.1f", m-100 }' "$GP_TERRAIN")
+
+        PLOT_CMD="\"${GP_TERRAIN}\" using 1:2 with filledcurves y1=${YMIN} title 'Terrain Profile' lc rgb '#A0826D' fs solid 0.7"
         PLOT_CMD+=", \"${GP_TERRAIN}\" using 1:2 with lines lc rgb '#6B4F3A' lw 1 notitle"
         PLOT_CMD+=", \"${GP_LOS}\" using 1:2 with lines lw 2 dt 2 lc 'black' title 'Line of Sight'"
         [[ -f "$GP_F1"  ]] && PLOT_CMD+=", \"${GP_F1}\"  using 1:2 with lines lw 1 lc 'green' title 'First Fresnel Zone (100%)'"
@@ -396,27 +446,28 @@ set output "${PROFILE_PNG}"
 set title "Site to Site Analysis"
 set xlabel "Distance (km)"
 set ylabel "Elevation (m AMSL)"
+set yrange [${YMIN}:*]
 set key right top
 set grid
 set style fill transparent solid 0.7 noborder
 plot ${PLOT_CMD}
 GNUPLOT_EOF
         gnuplot "$GPLOT_SCRIPT" 2>&1 | grep -v '^$' >&2 || true
-        [[ -f "$PROFILE_PNG" ]] || echo "AVISO: gnuplot no generó el perfil (verifica que gnuplot esté instalado)" >&2
+        [[ -f "$PROFILE_PNG" ]] || echo "WARNING: gnuplot did not generate the profile (check that gnuplot is installed)" >&2
         rm -f "$GPLOT_SCRIPT"
     fi
-    # Eliminar archivos intermedios _abs (solo se usan como input de gnuplot)
+    # Remove intermediate _abs files (used only as gnuplot input)
     rm -f "$GP_TERRAIN" "$GP_LOS" "$GP_F1" "$GP_F60"
 
-    # -------- Preparar descripción compartida --------
-    # GE no resuelve rutas "files/..." en CDATA de forma fiable en todas las
-    # versiones. Se incrusta la imagen como data URI base64 para evitar el problema.
+    # -------- Prepare shared description --------
+    # GE does not reliably resolve "files/..." paths inside CDATA across all
+    # versions. The image is embedded as a base64 data URI to avoid the issue.
     PROFILE_IMG_REF=""
     [[ -f "$PROFILE_PNG" ]] && PROFILE_IMG_REF="data:image/png;base64,$(base64 -w 0 "$PROFILE_PNG")"
 
     TXT_HTML="$(sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g' "${OUTPATH}.txt")"
 
-    # Emite el HTML de descripción a stdout (imagen + informe completo)
+    # Emit the description HTML to stdout (image + full report)
     write_full_desc() {
         [[ -n "$PROFILE_IMG_REF" ]] && \
             printf '<img src="%s" width="560"/><br/><br/>' "$PROFILE_IMG_REF"
@@ -425,9 +476,9 @@ GNUPLOT_EOF
         printf '</pre>'
     }
 
-    # -------- Construir segmentos de enlace (coordenadas, sin descripción) --------
-    # Se usa relativeToGround + AGL para que línea y pines sean coherentes con el
-    # terreno de Google Earth, evitando que la línea se hunda bajo el DEM de GE.
+    # -------- Build link segments (coordinates, no description) --------
+    # Uses relativeToGround + AGL so the line and pins match the
+    # Google Earth terrain, preventing the line from sinking below GE's DEM.
     TX_COORD="${TX_LON_TXT},${TX_LAT_TXT},${TX_ANT_AGL:-0}"
     RX_COORD="${RX_LON_TXT},${RX_LAT_TXT},${RX_ANT_AGL:-0}"
     SEG_COLORS=(); SEG_NAMES=(); SEG_COORDS=()
@@ -484,15 +535,15 @@ for lat,lon,dist,elev in m:
         SEG_COORDS+=("${PREV_COORD} ${RX_COORD}")
     fi
 
-    # -------- Escribir KML --------
-    # Pins: altitudeMode=relativeToGround con altura AGL → siempre visibles sobre el
-    # terreno de Google Earth aunque su DEM difiera del MDT de Navarra.
-    # Líneas: altitudeMode=absolute con AMSL reales del análisis.
+    # -------- Write KML --------
+    # Pins: altitudeMode=relativeToGround with AGL height -> always visible above
+    # Google Earth terrain even if its DEM differs from the source MDT.
+    # Lines: altitudeMode=absolute with real AMSL values from the analysis.
     {
         printf '<?xml version="1.0" encoding="UTF-8"?>\n'
         printf '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document><name>%s</name>\n' "$BASENAME"
 
-        # GroundOverlay de cobertura (solo si se ejecutó -coverage con éxito)
+        # Coverage GroundOverlay (only if -coverage ran successfully)
         if [[ -n "$COV_PNG" && -n "$BBOX_NORTH" ]]; then
             printf '  <GroundOverlay>\n    <name>Plot</name>\n'
             printf '    <Icon><href>files/%s</href></Icon>\n' "$(basename "$COV_PNG")"
@@ -502,7 +553,16 @@ for lat,lon,dist,elev in m:
             printf '    </LatLonBox>\n  </GroundOverlay>\n'
         fi
 
-        # Pin TX (verde) — relativeToGround
+        if [[ -n "$LEGEND_PNG" && -f "$LEGEND_PNG" ]]; then
+            printf '  <ScreenOverlay>\n    <name>Legend</name>\n'
+            printf '    <Icon><href>files/legend.png</href></Icon>\n'
+            printf '    <overlayXY x="0" y="0" xunits="fraction" yunits="fraction"/>\n'
+            printf '    <screenXY x="0.012" y="0.04" xunits="fraction" yunits="fraction"/>\n'
+            printf '    <size x="0" y="0" xunits="fraction" yunits="fraction"/>\n'
+            printf '  </ScreenOverlay>\n'
+        fi
+
+        # TX pin (green) — relativeToGround
         printf '  <Placemark>\n    <name>Station 1: %s</name>\n' "$TX_SITE"
         printf '    <description><![CDATA['
         write_full_desc
@@ -514,7 +574,7 @@ for lat,lon,dist,elev in m:
         printf '<coordinates>%s,%s,%s</coordinates></Point>\n  </Placemark>\n' \
             "$TX_LON_TXT" "$TX_LAT_TXT" "${TX_ANT_AGL:-0}"
 
-        # Pin RX (rojo) — relativeToGround — misma descripción
+        # RX pin (red) — relativeToGround — same description
         printf '  <Placemark>\n    <name>Station 2: %s</name>\n' "$RX_SITE"
         printf '    <description><![CDATA['
         write_full_desc
@@ -526,9 +586,9 @@ for lat,lon,dist,elev in m:
         printf '<coordinates>%s,%s,%s</coordinates></Point>\n  </Placemark>\n' \
             "$RX_LON_TXT" "$RX_LAT_TXT" "${RX_ANT_AGL:-0}"
 
-        # Segmentos de enlace — relativeToGround + AGL — misma descripción
-        # Coherente con los pines: ambos usan el DEM de Google Earth como referencia,
-        # evitando que la línea se hunda bajo el terreno de GE.
+        # Link segments — relativeToGround + AGL — same description
+        # Consistent with the pins: both use Google Earth's DEM as reference,
+        # preventing the line from sinking below GE's terrain.
         for i in "${!SEG_COORDS[@]}"; do
             printf '  <Placemark>\n    <name>%s</name>\n' "${SEG_NAMES[$i]}"
             printf '    <description><![CDATA['
@@ -541,21 +601,22 @@ for lat,lon,dist,elev in m:
                 "${SEG_COORDS[$i]}"
         done
 
-        # Pines de obstáculos
+        # Obstruction pins
         echo -n "$OBS_PINS"
 
         printf '</Document>\n</kml>\n'
     } > "${OUTPATH}.kml"
 
-    # -------- Crear KMZ --------
+    # -------- Create KMZ --------
     KMZ_TMP="$(mktemp -d)"
     mkdir -p "${KMZ_TMP}/files"
-    # El KML raíz debe llamarse doc.kml para que GE resuelva rutas "files/..." en descripciones
+    # The root KML must be named doc.kml so GE resolves "files/..." paths in descriptions
     cp "${OUTPATH}.kml"  "${KMZ_TMP}/doc.kml"
     cp "${OUTPATH}.txt"  "${KMZ_TMP}/${BASENAME}.txt"
     cp "${OUTPATH}.json" "${KMZ_TMP}/${BASENAME}.json"
     [[ -f "$PROFILE_PNG" ]]              && cp "$PROFILE_PNG" "${KMZ_TMP}/files/"
     [[ -n "$COV_PNG" && -f "$COV_PNG" ]] && cp "$COV_PNG"     "${KMZ_TMP}/files/"
+    [[ -n "$LEGEND_PNG" && -f "$LEGEND_PNG" ]] && cp "$LEGEND_PNG" "${KMZ_TMP}/files/legend.png"
     (cd "$KMZ_TMP" && zip -qr "${OUTPATH}.kmz" .)
     rm -rf "$KMZ_TMP"
 
@@ -572,7 +633,7 @@ for lat,lon,dist,elev in m:
 fi
 
 # ============================================================
-# MODO COBERTURA DE AREA
+# AREA COVERAGE MODE
 # ============================================================
 generate_dcf "${OUTPATH}.dcf"
 
@@ -582,22 +643,22 @@ _filter_log < "$TMPLOG" >&2
 
 PPM="${OUTPATH}.ppm"
 if [[ ! -f "$PPM" ]]; then
-    echo "ERROR: fichero PPM no encontrado: $PPM" >&2; rm -f "$TMPLOG"; exit 1
+    echo "ERROR: PPM file not found: $PPM" >&2; rm -f "$TMPLOG"; exit 1
 fi
 
-# PNG: límite de 8192 px (GE no aprovecha más en un GroundOverlay) para evitar
-# el agotamiento de caché de ImageMagick en imágenes de alta resolución.
-# '8192x8192>' solo escala si la imagen es más grande; mantiene la relación de aspecto.
+# PNG: cap at 8192 px (GE does not use more in a GroundOverlay) to avoid
+# ImageMagick cache exhaustion on high-resolution images.
+# '8192x8192>' only downscales if the image is larger; keeps the aspect ratio.
 if ! convert -limit memory 2GiB -limit disk 32GiB \
         "$PPM" -resize '8192x8192>' -transparent white "${OUTPATH}.png" 2>&1; then
-    echo "AVISO: conversión PNG fallida. Prueba a reducir la resolución con -resample." >&2
+    echo "WARNING: PNG conversion failed. Try reducing resolution with -resample." >&2
     rm -f "${OUTPATH}.png"
 fi
 
-# TIFF: resolución completa con compresión LZW para uso GIS
+# TIFF: full resolution with LZW compression for GIS use
 if ! convert -limit memory 2GiB -limit disk 32GiB -compress LZW \
         "$PPM" "${OUTPATH}.tiff" 2>&1; then
-    echo "AVISO: conversión TIFF fallida." >&2
+    echo "WARNING: TIFF conversion failed." >&2
     rm -f "${OUTPATH}.tiff"
 fi
 
@@ -605,8 +666,8 @@ BBOX="$(grep '^|' "$TMPLOG" | tail -1)" || true
 rm -f "$TMPLOG"
 
 if [[ -z "$BBOX" ]]; then
-    echo "AVISO: bounding box no encontrado. KMZ no generado." >&2
-    echo "Archivos generados: ${OUTPATH}.ppm  ${OUTPATH}.dcf" >&2
+    echo "WARNING: bounding box not found. KMZ not generated." >&2
+    echo "Generated files: ${OUTPATH}.ppm  ${OUTPATH}.dcf" >&2
     exit 0
 fi
 
@@ -618,6 +679,13 @@ TX_LABEL="${TX_NAME:-TX}"
 RX_LABEL="${RX_NAME:-RX}"
 [[ -n "$RX_H" ]] && RX_LABEL="${RX_LABEL} (${RX_H}m AGL)"
 
+# Legend (colour -> dBm) for the coverage overlay
+LEGEND_PNG=""
+if [[ -f "${OUTPATH}.png" ]]; then
+    LEGEND_PNG="${OUTPATH}_legend.png"
+    generate_legend "${OUTPATH}.dcf" "$LEGEND_PNG" || LEGEND_PNG=""
+fi
+
 {
     printf '<?xml version="1.0" encoding="UTF-8"?>\n'
     printf '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document><name>%s</name>\n' "$BASENAME"
@@ -628,6 +696,14 @@ RX_LABEL="${RX_NAME:-RX}"
         printf '      <north>%s</north>\n      <east>%s</east>\n' "$NORTH" "$EAST"
         printf '      <south>%s</south>\n      <west>%s</west>\n' "$SOUTH" "$WEST"
         printf '    </LatLonBox>\n  </GroundOverlay>\n'
+    fi
+    if [[ -n "$LEGEND_PNG" && -f "$LEGEND_PNG" ]]; then
+        printf '  <ScreenOverlay>\n    <name>Legend</name>\n'
+        printf '    <Icon><href>files/legend.png</href></Icon>\n'
+        printf '    <overlayXY x="0" y="0" xunits="fraction" yunits="fraction"/>\n'
+        printf '    <screenXY x="0.012" y="0.04" xunits="fraction" yunits="fraction"/>\n'
+        printf '    <size x="0" y="0" xunits="fraction" yunits="fraction"/>\n'
+        printf '  </ScreenOverlay>\n'
     fi
     if [[ -n "$TX_LAT" && -n "$TX_LON" ]]; then
         printf '  <Placemark>\n    <name>%s</name>\n' "$TX_LABEL"
@@ -648,16 +724,17 @@ RX_LABEL="${RX_NAME:-RX}"
     printf '</Document>\n</kml>\n'
 } > "${OUTPATH}.kml"
 
-# KMZ con estructura files/
+# KMZ with files/ structure
 KMZ_TMP="$(mktemp -d)"
 mkdir -p "${KMZ_TMP}/files"
 cp "${OUTPATH}.kml" "${KMZ_TMP}/${BASENAME}.kml"
 [[ -f "${OUTPATH}.png" ]] && cp "${OUTPATH}.png" "${KMZ_TMP}/files/${BASENAME}.png"
+[[ -n "$LEGEND_PNG" && -f "$LEGEND_PNG" ]] && cp "$LEGEND_PNG" "${KMZ_TMP}/files/legend.png"
 (cd "$KMZ_TMP" && zip -qr "${OUTPATH}.kmz" .)
 rm -rf "$KMZ_TMP"
 
 echo ""
-echo "Archivos generados:"
+echo "Generated files:"
 echo "  ${OUTPATH}.ppm"
 [[ -f "${OUTPATH}.png"  ]] && echo "  ${OUTPATH}.png"
 [[ -f "${OUTPATH}.tiff" ]] && echo "  ${OUTPATH}.tiff"

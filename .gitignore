@@ -1,4 +1,4 @@
-# data created by Signal-Server
+# Build artifacts
 src/*.o
 src/signalserver
 src/signalserverHD
@@ -8,6 +8,37 @@ signalserverHD
 signalserverLIDAR
 tests/*
 
-# height data
+# Terrain data: downloaded DTMs are large and must never be committed.
+# Default download folder, plus IGN tiles in any models directory.
+data/dtm/*
+!data/dtm/README.md
+MDT*_*.tif
 *.asc
 *.prj
+*.tif
+*.tiff
+
+# Generated SDF tiles and run outputs: keep the folders, ignore their contents.
+data/sdf/*
+!data/sdf/.gitkeep
+results/*
+!results/.gitkeep
+
+# Simulation outputs anywhere (raster/overlay). NOTE: *.dcf is NOT ignored
+# globally so the colour palettes in data/colors/ stay versioned.
+*.ppm
+*.kmz
+
+# Compiled SDF tools (build them from the .c sources in tools/sdf/)
+tools/sdf/srtm2sdf
+tools/sdf/srtm2sdf-hd
+tools/sdf/usgs2sdf
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editor / OS
+*.swp
+*~
+.DS_Store

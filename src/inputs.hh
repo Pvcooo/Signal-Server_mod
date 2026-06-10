@@ -4,7 +4,6 @@
 #include "common.h"
 extern char scf_file[255];
 
-/* Resample input tiles to new resolution */
 int resample_data(int scaling_factor);
 int resize_data(int resolution);
 
@@ -24,6 +23,6 @@ int loadLIDAR(char *filename, int resample, double tx_lat, double tx_lon_west, d
 int loadClutter(char *filename, double radius, struct site tx);
 int averageHeight(int h, int w, int x, int y);
 static const char AZ_FILE_SUFFIX[] = ".az";
-static const char EL_FILE_SUFFIX[] = ".el"; 
+static const char EL_FILE_SUFFIX[] = ".el";
 
-#endif /* _INPUTS_HH_ */
+#endif

@@ -6,9 +6,9 @@
 
 
 # Variables
-SSDIR=/usr/src/Signal-Server
-LIST1=/usr/src/Signal-Server/tiles-source.lst
-DEST=/usr/src/SDF
+SSDIR="$(cd "$(dirname "$0")/.." && pwd)"
+LIST1="$SSDIR/tiles-source.lst"
+DEST="$SSDIR/data/sdf"
 
 # Functions
 check_dest() {
@@ -63,7 +63,7 @@ convert_files() {
                 echo 'Converting files.... Please be patient, this can take some time.'
 		echo
 		cd $DEST
-		for file in *.hgt; do /usr/src/Signal-Server/utils/sdf/srtm2sdf -d /dev/null $file > /dev/null 2>&1; done
+		for file in *.hgt; do "$SSDIR/tools/sdf/srtm2sdf" -d /dev/null $file > /dev/null 2>&1; done
 #		if [ ! -f "$DEST/*.sdf" ]; then
 #			rm -fr *.hgt
 #                fi

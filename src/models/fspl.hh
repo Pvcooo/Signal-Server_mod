@@ -3,4 +3,4 @@
 
 double FSPLpathLoss(float f, float d);
 
-#endif /* _FSPL_HH_ */
+#endif

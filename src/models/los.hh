@@ -15,4 +15,4 @@ void PlotPropagation(struct site source, double altitude, char *plo_filename,
 		     int propmodel, int knifeedge, int haf, int pmenv, bool use_threads);
 void PlotPath(struct site source, struct site destination, char mask_value);
 
-#endif /* _LOS_HH_ */
+#endif
